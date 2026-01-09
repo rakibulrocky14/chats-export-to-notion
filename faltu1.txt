@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Exporter Actions</title>
+    <meta name="manifest.type" content="browser_action">
+    <style>
+      body {
+        margin: 0;
+      }
+    </style>
+    <script type="module" crossorigin src="/chunks/popup-Dcfl-PTk.js"></script>
+    <link rel="modulepreload" crossorigin href="/chunks/chunk-QIZ4XBKF-CNASw5nw.js">
+    <link rel="stylesheet" crossorigin href="/assets/popup-Y0F3fDQJ.css">
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
+</html>
