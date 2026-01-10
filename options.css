@@ -1365,3 +1365,23 @@ body {
 .empty-state .empty-icon {
     font-size: 32px;
 }
+
+/* Platform Icon Display */
+.platform-icon-display {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: var(--glass-bg);
+    border-radius: 8px;
+    border: 1px solid var(--glass-border);
+}
+
+.platform-icon-display .platform-icon {
+    display: none;
+}
+
+.platform-icon-display .platform-icon.active {
+    display: block;
+}

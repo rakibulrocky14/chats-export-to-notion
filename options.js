@@ -797,6 +797,27 @@ async function updatePlatformSelector() {
     }
 
     log(`Found ${tabs.length} AI platform tab(s)`, 'success');
+
+    // Update the visual platform icon
+    updatePlatformIcon();
+}
+
+function updatePlatformIcon() {
+    const iconDisplay = document.getElementById('platformIconDisplay');
+    if (!iconDisplay) return;
+
+    // Hide all icons first
+    iconDisplay.querySelectorAll('.platform-icon').forEach(icon => {
+        icon.style.display = 'none';
+    });
+
+    // Show the icon matching current platform
+    if (currentPlatform) {
+        const activeIcon = iconDisplay.querySelector(`[data-platform="${currentPlatform}"]`);
+        if (activeIcon) {
+            activeIcon.style.display = 'block';
+        }
+    }
 }
 
 async function getAITab() {
