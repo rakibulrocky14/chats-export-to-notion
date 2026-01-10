@@ -317,6 +317,43 @@ async function handleGetThreadListOffset(adapter, payload, sendResponse) {
                 }
             });
         }
+        // ENTERPRISE: ChatGPT with native offset support
+        else if (adapter.name === 'ChatGPT') {
+            const baseUrl = 'https://chatgpt.com/backend-api';
+            const url = `${baseUrl}/conversations?offset=${offset}&limit=${limit}&order=updated`;
+
+            const response = await fetch(url, { credentials: 'include' });
+            if (response.ok) {
+                const data = await response.json();
+                const threads = (data.items || []).map(t => ({
+                    uuid: t.id,
+                    title: t.title || 'ChatGPT Chat',
+                    last_query_datetime: t.update_time
+                }));
+                sendResponse({
+                    success: true,
+                    data: { threads, offset, hasMore: threads.length === limit, total: data.total }
+                });
+            } else {
+                // Fallback to page-based
+                const page = Math.floor(offset / limit) + 1;
+                const result = await adapter.getThreads(page, limit);
+                sendResponse({ success: true, data: result });
+            }
+        }
+        // ENTERPRISE: Gemini with API support
+        else if (adapter.name === 'Gemini') {
+            const page = Math.floor(offset / limit) + 1;
+            const result = await adapter.getThreads(page, limit);
+            sendResponse({
+                success: true,
+                data: {
+                    threads: result.threads || result,
+                    offset,
+                    hasMore: result.hasMore || false
+                }
+            });
+        }
         // ENTERPRISE: Use getAllThreads if adapter supports it (for complete Load All)
         else if (payload.loadAll && adapter.getAllThreads) {
             const threads = await adapter.getAllThreads();
