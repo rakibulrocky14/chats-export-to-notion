@@ -830,4 +830,177 @@ async function buildNotionProperties(data, dbId, apiKey, entries = []) {
     return properties;
 }
 
+// ============================================
+// MULTI-THREAD MANAGER (Phase 9)
+// ============================================
 
+let availableThreads = [];
+let selectedThreadIds = new Set();
+let isExportingBulk = false;
+
+function initMultiThreadManager() {
+    const refreshBtn = document.getElementById('refreshThreads');
+    const selectAllBtn = document.getElementById('selectAllThreads');
+    const bulkExportBtn = document.getElementById('bulkExportBtn');
+
+    if (refreshBtn) refreshBtn.addEventListener('click', fetchThreads);
+    if (selectAllBtn) selectAllBtn.addEventListener('click', toggleSelectAll);
+    if (bulkExportBtn) bulkExportBtn.addEventListener('click', handleBulkExport);
+}
+
+async function fetchThreads() {
+    const threadListEl = document.getElementById('threadList');
+    const threadCountEl = document.getElementById('threadCount');
+    const refreshBtn = document.getElementById('refreshThreads');
+
+    if (!threadListEl) return;
+
+    threadListEl.innerHTML = '<div class="thread-list-placeholder">Loading...</div>';
+    if (refreshBtn) refreshBtn.disabled = true;
+
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) {
+            threadListEl.innerHTML = '<div class="thread-list-placeholder">No active tab</div>';
+            return;
+        }
+
+        chrome.tabs.sendMessage(tab.id, { type: 'GET_THREAD_LIST', payload: { page: 1, limit: 50 } }, (response) => {
+            if (chrome.runtime.lastError || !response?.success) {
+                threadListEl.innerHTML = '<div class="thread-list-placeholder">Failed to load.<br>Make sure you are logged in.</div>';
+                return;
+            }
+
+            availableThreads = Array.isArray(response.data) ? response.data : (response.data?.threads || []);
+            if (threadCountEl) threadCountEl.textContent = availableThreads.length;
+            renderThreadList();
+        });
+    } catch (e) {
+        threadListEl.innerHTML = '<div class="thread-list-placeholder">Error loading threads</div>';
+    } finally {
+        if (refreshBtn) refreshBtn.disabled = false;
+    }
+}
+
+function renderThreadList() {
+    const threadListEl = document.getElementById('threadList');
+    if (!threadListEl) return;
+
+    if (availableThreads.length === 0) {
+        threadListEl.innerHTML = '<div class="thread-list-placeholder">No conversations found</div>';
+        return;
+    }
+
+    threadListEl.innerHTML = '';
+    availableThreads.forEach(thread => {
+        const item = document.createElement('div');
+        item.className = 'thread-item';
+        item.dataset.uuid = thread.uuid;
+
+        const date = thread.last_query_datetime ? new Date(thread.last_query_datetime).toLocaleDateString() : '';
+        item.innerHTML = `
+            <input type="checkbox" class="thread-checkbox" ${selectedThreadIds.has(thread.uuid) ? 'checked' : ''}>
+            <div class="thread-info">
+                <div class="thread-title" title="${thread.title || 'Untitled'}">${thread.title || 'Untitled'}</div>
+                <div class="thread-date">${date}</div>
+            </div>
+        `;
+
+        const checkbox = item.querySelector('.thread-checkbox');
+        item.addEventListener('click', (e) => {
+            if (e.target !== checkbox) {
+                checkbox.checked = !checkbox.checked;
+            }
+            handleThreadSelection(thread.uuid, checkbox.checked);
+        });
+
+        threadListEl.appendChild(item);
+    });
+}
+
+function handleThreadSelection(uuid, isSelected) {
+    if (isSelected) {
+        selectedThreadIds.add(uuid);
+    } else {
+        selectedThreadIds.delete(uuid);
+    }
+    updateBulkActionsUI();
+}
+
+function toggleSelectAll() {
+    const allSelected = availableThreads.length > 0 && availableThreads.every(t => selectedThreadIds.has(t.uuid));
+
+    if (allSelected) {
+        selectedThreadIds.clear();
+    } else {
+        availableThreads.forEach(t => selectedThreadIds.add(t.uuid));
+    }
+    renderThreadList();
+    updateBulkActionsUI();
+}
+
+function updateBulkActionsUI() {
+    const bulkActionsEl = document.getElementById('bulkActions');
+    const selectedCountEl = document.getElementById('selectedCount');
+
+    if (selectedCountEl) selectedCountEl.textContent = `${selectedThreadIds.size} selected`;
+    if (bulkActionsEl) bulkActionsEl.style.display = selectedThreadIds.size > 0 ? 'flex' : 'none';
+}
+
+async function handleBulkExport() {
+    if (selectedThreadIds.size === 0 || isExportingBulk) return;
+
+    isExportingBulk = true;
+    const bulkExportBtn = document.getElementById('bulkExportBtn');
+    const exportProgressEl = document.getElementById('exportProgress');
+    const progressFillEl = document.getElementById('progressFill');
+    const progressTextEl = document.getElementById('progressText');
+
+    if (bulkExportBtn) bulkExportBtn.disabled = true;
+    if (exportProgressEl) exportProgressEl.style.display = 'block';
+
+    const uuids = Array.from(selectedThreadIds);
+    const total = uuids.length;
+    let processed = 0, successes = 0, failures = 0;
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    for (const uuid of uuids) {
+        const percent = Math.round((processed / total) * 100);
+        if (progressFillEl) progressFillEl.style.width = `${percent}%`;
+        if (progressTextEl) progressTextEl.textContent = `Exporting ${processed + 1}/${total}...`;
+
+        try {
+            await new Promise((resolve) => {
+                chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_CONTENT_BY_UUID', payload: { uuid } }, (response) => {
+                    if (response?.success && typeof ExportManager !== 'undefined') {
+                        try {
+                            ExportManager.export(response.data, selectedExportFormat, currentPlatform);
+                            successes++;
+                        } catch { failures++; }
+                    } else { failures++; }
+                    resolve();
+                });
+            });
+        } catch { failures++; }
+
+        processed++;
+        await new Promise(r => setTimeout(r, 800)); // Rate limit
+    }
+
+    if (progressFillEl) progressFillEl.style.width = '100%';
+    if (progressTextEl) progressTextEl.textContent = `Done! ${successes} exported, ${failures} failed`;
+
+    setTimeout(() => {
+        isExportingBulk = false;
+        if (bulkExportBtn) bulkExportBtn.disabled = false;
+        if (successes === total) {
+            selectedThreadIds.clear();
+            renderThreadList();
+            updateBulkActionsUI();
+        }
+    }, 2000);
+}
+
+// Initialize multi-thread manager after DOM loads
+document.addEventListener('DOMContentLoaded', initMultiThreadManager);
