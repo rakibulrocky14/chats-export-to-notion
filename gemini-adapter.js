@@ -13,6 +13,11 @@ const GeminiAdapter = {
     },
 
     getThreads: async function (page = 0, limit = 20) {
+        // Check if NetworkInterceptor captured chat list
+        if (window.NetworkInterceptor && window.NetworkInterceptor.getChatList().length > 0) {
+            return window.NetworkInterceptor.getChatList().slice(0, limit);
+        }
+
         const threads = [];
         const currentUuid = this.extractUuid(window.location.href);
         threads.push({

@@ -24,6 +24,11 @@ const GrokAdapter = {
 
     // Try to get list of conversations
     getThreads: async (page = 0, limit = 20) => {
+        // Check if NetworkInterceptor captured chat list
+        if (window.NetworkInterceptor && window.NetworkInterceptor.getChatList().length > 0) {
+            return window.NetworkInterceptor.getChatList().slice(0, limit);
+        }
+
         const threads = [];
 
         // Try API endpoints that might list conversations
