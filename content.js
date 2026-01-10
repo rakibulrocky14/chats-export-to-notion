@@ -949,13 +949,72 @@ const ChatGPTAdapter = {
     getSpaces: async () => []
 };
 
-// --- Claude Implementation (Uses Platform Config) ---
+// --- Claude Implementation (Enterprise Edition - Matches Perplexity Quality) ---
 const ClaudeAdapter = {
     name: "Claude",
     _cachedOrgId: null,
 
+    // Cache for pagination
+    _allThreadsCache: [],
+    _cacheTimestamp: 0,
+    _cacheTTL: 60000, // 1 minute
+
     extractUuid: (url) => {
         return platformConfig.extractUuid('Claude', url);
+    },
+
+    // ============================================
+    // ENTERPRISE: Anti-bot headers
+    // ============================================
+    _getHeaders: () => {
+        return {
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Content-Type': 'application/json',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin'
+        };
+    },
+
+    // ============================================
+    // ENTERPRISE: Retry with exponential backoff
+    // ============================================
+    _fetchWithRetry: async (url, options = {}, maxRetries = 3) => {
+        let lastError;
+        const headers = { ...ClaudeAdapter._getHeaders(), ...options.headers };
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                const response = await fetch(url, {
+                    credentials: 'include',
+                    headers,
+                    ...options
+                });
+
+                if (response.ok) return response;
+
+                if (response.status === 401 || response.status === 403) {
+                    throw new Error('Authentication required - please login to Claude');
+                }
+
+                if (response.status === 429) {
+                    const waitTime = Math.pow(2, attempt + 2) * 1000;
+                    console.warn(`[Claude] Rate limited, waiting ${waitTime}ms`);
+                    await new Promise(r => setTimeout(r, waitTime));
+                    continue;
+                }
+
+                lastError = new Error(`HTTP ${response.status}`);
+            } catch (e) {
+                lastError = e;
+            }
+
+            if (attempt < maxRetries - 1) {
+                await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+            }
+        }
+        throw lastError;
     },
 
     async getOrgId() {
@@ -964,14 +1023,9 @@ const ClaudeAdapter = {
         try {
             const baseUrl = platformConfig.getBaseUrl('Claude');
             const endpoint = platformConfig.buildEndpoint('Claude', 'organizations');
-            const orgsResp = await fetch(`${baseUrl}${endpoint}`, { credentials: "include" });
+            const response = await ClaudeAdapter._fetchWithRetry(`${baseUrl}${endpoint}`);
 
-            if (!orgsResp.ok) {
-                platformConfig.markEndpointFailed('Claude', 'organizations');
-                throw new Error('Failed to fetch Claude organizations');
-            }
-
-            const orgs = await orgsResp.json();
+            const orgs = await response.json();
             if (!orgs || orgs.length === 0) {
                 throw new Error('No Claude organizations found. Please check your login.');
             }
@@ -985,28 +1039,67 @@ const ClaudeAdapter = {
         }
     },
 
-    getThreads: async function (page, limit) {
+    // ============================================
+    // ENTERPRISE: Get ALL threads (Load All feature)
+    // ============================================
+    getAllThreads: async function (progressCallback = null) {
         try {
             const orgId = await this.getOrgId();
             const baseUrl = platformConfig.getBaseUrl('Claude');
             const endpoint = platformConfig.buildEndpoint('Claude', 'conversations', { org: orgId });
-            const url = `${baseUrl}${endpoint}`;
-
-            const response = await fetch(url, { credentials: "include" });
-
-            if (!response.ok) {
-                platformConfig.markEndpointFailed('Claude', 'conversations');
-                throw new Error(`Claude API error: ${response.status}`);
-            }
+            const response = await ClaudeAdapter._fetchWithRetry(`${baseUrl}${endpoint}`);
 
             const data = await response.json();
+            const threads = (Array.isArray(data) ? data : []).map(t => ({
+                uuid: t.uuid,
+                title: DataExtractor.extractTitle(t, 'Claude'),
+                last_query_datetime: t.updated_at,
+                platform: 'Claude'
+            }));
+
+            // Update cache
+            ClaudeAdapter._allThreadsCache = threads;
+            ClaudeAdapter._cacheTimestamp = Date.now();
+
+            if (progressCallback) {
+                progressCallback(threads.length, false);
+            }
+
+            return threads;
+        } catch (error) {
+            console.error('[Claude] getAllThreads failed:', error);
+            throw error;
+        }
+    },
+
+    // ============================================
+    // ENTERPRISE: Offset-based fetching
+    // ============================================
+    getThreadsWithOffset: async function (offset = 0, limit = 50) {
+        // Check cache validity
+        const cacheValid = ClaudeAdapter._cacheTimestamp > Date.now() - ClaudeAdapter._cacheTTL;
+
+        if (!cacheValid || ClaudeAdapter._allThreadsCache.length === 0) {
+            await ClaudeAdapter.getAllThreads();
+        }
+
+        const threads = ClaudeAdapter._allThreadsCache.slice(offset, offset + limit);
+        return {
+            threads,
+            offset,
+            hasMore: offset + limit < ClaudeAdapter._allThreadsCache.length,
+            total: ClaudeAdapter._allThreadsCache.length
+        };
+    },
+
+    // Standard page-based (backwards compatible)
+    getThreads: async function (page, limit) {
+        try {
+            const result = await this.getThreadsWithOffset((page - 1) * limit, limit);
+
             return {
-                threads: (Array.isArray(data) ? data : []).map(t => ({
-                    uuid: t.uuid,
-                    title: DataExtractor.extractTitle(t, 'Claude'),
-                    last_query_datetime: t.updated_at
-                })),
-                hasMore: false,
+                threads: result.threads,
+                hasMore: result.hasMore,
                 page
             };
         } catch (error) {
@@ -1015,6 +1108,9 @@ const ClaudeAdapter = {
         }
     },
 
+    // ============================================
+    // ENTERPRISE: Resilient thread detail fetching
+    // ============================================
     getThreadDetail: async function (uuid) {
         try {
             const orgId = await this.getOrgId();
@@ -1022,20 +1118,76 @@ const ClaudeAdapter = {
             const endpoint = platformConfig.buildEndpoint('Claude', 'conversationDetail', { org: orgId, uuid });
             const url = `${baseUrl}${endpoint}`;
 
-            const response = await fetch(url, { credentials: "include" });
-
-            if (!response.ok) {
-                platformConfig.markEndpointFailed('Claude', 'conversationDetail');
-                throw new Error(`Claude API error: ${response.status}`);
-            }
-
+            const response = await ClaudeAdapter._fetchWithRetry(url);
             const data = await response.json();
-            return { entries: transformClaudeData(data), title: data.name };
+
+            console.log(`[Claude] API success for ${uuid}`);
+            return {
+                uuid,
+                entries: transformClaudeData(data),
+                title: data.name,
+                platform: 'Claude'
+            };
         } catch (error) {
             console.error('[Claude] getThreadDetail error:', error);
-            throw error;
+
+            // Check if this is the current conversation
+            const isCurrentConversation = window.location.href.includes(uuid);
+            if (isCurrentConversation) {
+                console.log('[Claude] Falling back to DOM extraction');
+                return ClaudeAdapter.extractFromDOM(uuid);
+            }
+
+            return {
+                uuid,
+                title: 'Unable to fetch - API error',
+                platform: 'Claude',
+                entries: [],
+                error: 'API access failed - can only export current conversation'
+            };
         }
-    }
+    },
+
+    extractFromDOM: (uuid) => {
+        console.log('[Claude] Starting DOM extraction...');
+        const messages = [];
+
+        // Strategy 1: Human/assistant message pairs
+        const humanMessages = document.querySelectorAll('[class*="human-turn"], [data-testid="human-turn"]');
+        const assistantMessages = document.querySelectorAll('[class*="assistant-turn"], [data-testid="assistant-turn"]');
+
+        if (humanMessages.length > 0 || assistantMessages.length > 0) {
+            const max = Math.max(humanMessages.length, assistantMessages.length);
+            for (let i = 0; i < max; i++) {
+                messages.push({
+                    query: humanMessages[i]?.innerText?.trim() || '',
+                    answer: assistantMessages[i]?.innerText?.trim() || ''
+                });
+            }
+        }
+
+        // Strategy 2: Prose/markdown containers
+        if (messages.length === 0) {
+            const proseBlocks = document.querySelectorAll('.prose, [class*="markdown"]');
+            let currentQuery = '';
+            proseBlocks.forEach((block, i) => {
+                const text = block.innerText?.trim() || '';
+                if (text.length > 10) {
+                    if (i % 2 === 0) {
+                        currentQuery = text;
+                    } else {
+                        messages.push({ query: currentQuery, answer: text });
+                        currentQuery = '';
+                    }
+                }
+            });
+        }
+
+        const title = document.title?.replace(' — Claude', '').replace(' - Claude', '').trim() || 'Claude Conversation';
+        return { uuid, title, platform: 'Claude', entries: messages.filter(m => m.query || m.answer) };
+    },
+
+    getSpaces: async () => []
 };
 
 // --- Helper Functions ---

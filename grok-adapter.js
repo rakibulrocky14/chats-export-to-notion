@@ -1,64 +1,181 @@
-// OmniExporter AI - Grok Adapter (API + DOM Fallback)
+// OmniExporter AI - Grok Adapter (Enterprise Edition)
 // Support for xAI Grok (grok.com and x.com/i/grok)
-// Uses discovered API endpoints for better extraction
+// Enterprise-level matching Perplexity quality
+// NOW USES: platformConfig for centralized configuration
 
 const GrokAdapter = {
     name: "Grok",
-    apiBase: "https://grok.com/rest/app-chat",
+
+    // ============================================
+    // ENTERPRISE: Use platformConfig for endpoints
+    // ============================================
+    get config() {
+        return typeof platformConfig !== 'undefined'
+            ? platformConfig.getConfig('Grok')
+            : null;
+    },
+
+    get apiBase() {
+        const config = this.config;
+        return config ? config.baseUrl + '/rest/app-chat' : 'https://grok.com/rest/app-chat';
+    },
+
+    // Cache for pagination
+    _allThreadsCache: [],
+    _cacheTimestamp: 0,
+    _cacheTTL: 60000, // 1 minute
 
     extractUuid: (url) => {
-        // Pattern 1: UUID in URL path or query
+        // Try platformConfig patterns first
+        if (typeof platformConfig !== 'undefined') {
+            const uuid = platformConfig.extractUuid('Grok', url);
+            if (uuid) return uuid;
+        }
+
+        // Fallback patterns
         const uuidMatch = url.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
         if (uuidMatch) return uuidMatch[1];
 
-        // Pattern 2: grok.com/chat/{id}
         const chatMatch = url.match(/grok\.com\/(?:chat|c)\/([a-zA-Z0-9_-]+)/);
         if (chatMatch) return chatMatch[1];
 
-        // Pattern 3: x.com/i/grok/{id}
         const xMatch = url.match(/x\.com\/i\/grok\/([a-zA-Z0-9_-]+)/);
         if (xMatch) return xMatch[1];
 
         return null;
     },
 
-    // Try to get list of conversations - VERIFIED API (discovered via chrome-devtools-mcp)
-    getThreads: async (page = 0, limit = 50) => {
-        // Check if NetworkInterceptor captured chat list
-        if (window.NetworkInterceptor && window.NetworkInterceptor.getChatList().length > 0) {
-            return window.NetworkInterceptor.getChatList().slice(0, limit);
-        }
+    // ============================================
+    // ENTERPRISE: Anti-bot headers
+    // ============================================
+    _getHeaders: () => {
+        return {
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'X-Requested-With': 'XMLHttpRequest'
+        };
+    },
 
-        const threads = [];
+    // ============================================
+    // ENTERPRISE: Retry with exponential backoff
+    // ============================================
+    _fetchWithRetry: async (url, options = {}, maxRetries = 3) => {
+        let lastError;
+        const headers = { ...GrokAdapter._getHeaders(), ...options.headers };
 
-        // VERIFIED ENDPOINT: /rest/app-chat/conversations (discovered 2026-01-10)
-        try {
-            const response = await fetch(`${GrokAdapter.apiBase}/conversations`, {
-                credentials: 'include',
-                headers: { 'Accept': 'application/json' }
-            });
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                const response = await fetch(url, {
+                    credentials: 'include',
+                    headers,
+                    ...options
+                });
 
-            if (response.ok) {
-                const data = await response.json();
-                const chats = data.conversations || data.data || data.items || [];
+                if (response.ok) return response;
 
-                if (Array.isArray(chats) && chats.length > 0) {
-                    chats.slice(0, limit).forEach(chat => {
-                        threads.push({
-                            uuid: chat.id || chat.conversationId || chat.uuid,
-                            title: chat.title || chat.name || 'Grok Chat',
-                            platform: 'Grok',
-                            last_query_datetime: chat.updatedAt || chat.createdAt || new Date().toISOString()
-                        });
-                    });
-                    return threads;
+                if (response.status === 401 || response.status === 403) {
+                    throw new Error('Authentication required - please login to Grok');
                 }
+
+                if (response.status === 429) {
+                    const waitTime = Math.pow(2, attempt + 2) * 1000;
+                    console.warn(`[Grok] Rate limited, waiting ${waitTime}ms`);
+                    await new Promise(r => setTimeout(r, waitTime));
+                    continue;
+                }
+
+                lastError = new Error(`HTTP ${response.status}`);
+            } catch (e) {
+                lastError = e;
             }
-        } catch (e) {
-            console.warn('[GrokAdapter] API fetch failed (may have CAPTCHA), trying DOM fallback');
+
+            if (attempt < maxRetries - 1) {
+                await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+            }
+        }
+        throw lastError;
+    },
+
+    // ============================================
+    // ENTERPRISE: Get ALL threads (Load All feature)
+    // ============================================
+    getAllThreads: async (progressCallback = null) => {
+        try {
+            const response = await GrokAdapter._fetchWithRetry(`${GrokAdapter.apiBase}/conversations`);
+            const data = await response.json();
+            const chats = data.conversations || data.data || data.items || [];
+
+            const threads = chats.map(chat => ({
+                uuid: chat.id || chat.conversationId || chat.uuid,
+                title: chat.title || chat.name || 'Grok Chat',
+                platform: 'Grok',
+                last_query_datetime: chat.updatedAt || chat.createdAt || new Date().toISOString()
+            }));
+
+            // Update cache
+            GrokAdapter._allThreadsCache = threads;
+            GrokAdapter._cacheTimestamp = Date.now();
+
+            if (progressCallback) {
+                progressCallback(threads.length, false);
+            }
+
+            return threads;
+        } catch (error) {
+            console.error('[Grok] getAllThreads failed:', error);
+            throw error;
+        }
+    },
+
+    // ============================================
+    // ENTERPRISE: Offset-based fetching
+    // ============================================
+    getThreadsWithOffset: async (offset = 0, limit = 50) => {
+        // Check cache validity
+        const cacheValid = GrokAdapter._cacheTimestamp > Date.now() - GrokAdapter._cacheTTL;
+
+        if (!cacheValid || GrokAdapter._allThreadsCache.length === 0) {
+            await GrokAdapter.getAllThreads();
         }
 
-        // DOM Fallback: Parse sidebar chat items (useful when CAPTCHA blocks API)
+        const threads = GrokAdapter._allThreadsCache.slice(offset, offset + limit);
+        return {
+            threads,
+            offset,
+            hasMore: offset + limit < GrokAdapter._allThreadsCache.length,
+            total: GrokAdapter._allThreadsCache.length
+        };
+    },
+
+    // Standard page-based (backwards compatible)
+    getThreads: async (page = 0, limit = 50) => {
+        // Check NetworkInterceptor first
+        if (window.NetworkInterceptor && window.NetworkInterceptor.getChatList().length > 0) {
+            const all = window.NetworkInterceptor.getChatList();
+            const start = page * limit;
+            return {
+                threads: all.slice(start, start + limit),
+                hasMore: start + limit < all.length,
+                page
+            };
+        }
+
+        try {
+            const result = await GrokAdapter.getThreadsWithOffset(page * limit, limit);
+            return {
+                threads: result.threads,
+                hasMore: result.hasMore,
+                page
+            };
+        } catch (e) {
+            console.warn('[Grok] API fetch failed, trying DOM fallback');
+        }
+
+        // DOM Fallback
+        const threads = [];
         try {
             const chatItems = document.querySelectorAll(
                 '[class*="conversation-item"], [class*="chat-item"], a[href*="/conversation/"], [data-testid="conversation"]'
@@ -92,22 +209,14 @@ const GrokAdapter = {
             }
         }
 
-        return threads;
+        return { threads, hasMore: false, page };
     },
 
+    // ============================================
+    // ENTERPRISE: Resilient thread detail fetching
+    // ============================================
     getThreadDetail: async (uuid) => {
-        // IMPORTANT: For batch export, we MUST use API - DOM only works for current conversation
         const isCurrentConversation = window.location.href.includes(uuid);
-
-        // Common headers to avoid bot detection
-        const headers = {
-            'Accept': 'application/json',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'X-Requested-With': 'XMLHttpRequest'
-        };
 
         // Try multiple API endpoints (Grok changes their API frequently)
         const endpoints = [
@@ -119,66 +228,56 @@ const GrokAdapter = {
 
         for (const endpoint of endpoints) {
             try {
-                console.log('[GrokAdapter] Trying API:', endpoint);
-                const response = await fetch(endpoint, { credentials: 'include', headers });
+                console.log('[Grok] Trying API:', endpoint);
+                const response = await GrokAdapter._fetchWithRetry(endpoint, {}, 2);
+                const data = await response.json();
 
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('[GrokAdapter] API success for', uuid);
+                const messages = data.messages || data.conversation?.messages ||
+                    data.data?.messages || data.turns || data.items || [];
 
-                    // Extract messages from various response formats
-                    const messages = data.messages || data.conversation?.messages ||
-                        data.data?.messages || data.turns || data.items || [];
+                if (Array.isArray(messages) && messages.length > 0) {
+                    const entries = [];
+                    let currentQuery = '';
 
-                    if (Array.isArray(messages) && messages.length > 0) {
-                        const entries = [];
-                        let currentQuery = '';
+                    messages.forEach(msg => {
+                        const role = (msg.role || msg.sender || msg.author || msg.type || '').toLowerCase();
+                        const content = msg.content || msg.text || msg.message ||
+                            (msg.parts ? msg.parts.join('\n') : '');
 
-                        messages.forEach(msg => {
-                            const role = (msg.role || msg.sender || msg.author || msg.type || '').toLowerCase();
-                            const content = msg.content || msg.text || msg.message ||
-                                (msg.parts ? msg.parts.join('\n') : '');
-
-                            if (role === 'user' || role === 'human') {
-                                currentQuery = content;
-                            } else if ((role === 'assistant' || role === 'grok' || role === 'bot' || role === 'ai') && currentQuery) {
-                                entries.push({ query: currentQuery, answer: content });
-                                currentQuery = '';
-                            }
-                        });
-
-                        // Handle unpaired last message
-                        if (currentQuery && messages.length > 0) {
-                            const lastMsg = messages[messages.length - 1];
-                            const lastContent = lastMsg.content || lastMsg.text || '';
-                            if (lastContent && lastContent !== currentQuery) {
-                                entries.push({ query: currentQuery, answer: lastContent });
-                            }
+                        if (role === 'user' || role === 'human') {
+                            currentQuery = content;
+                        } else if ((role === 'assistant' || role === 'grok' || role === 'bot' || role === 'ai') && currentQuery) {
+                            entries.push({ query: currentQuery, answer: content });
+                            currentQuery = '';
                         }
+                    });
 
-                        const title = data.title || data.conversation?.title ||
-                            data.name || 'Grok Conversation';
-
-                        return { uuid, title, platform: 'Grok', entries };
+                    // Handle unpaired last message
+                    if (currentQuery && messages.length > 0) {
+                        const lastMsg = messages[messages.length - 1];
+                        const lastContent = lastMsg.content || lastMsg.text || '';
+                        if (lastContent && lastContent !== currentQuery) {
+                            entries.push({ query: currentQuery, answer: lastContent });
+                        }
                     }
-                } else if (response.status === 403 || response.status === 429) {
-                    console.warn('[GrokAdapter] API blocked (403/429) for:', endpoint);
-                    continue; // Try next endpoint
+
+                    const title = data.title || data.conversation?.title || data.name || 'Grok Conversation';
+                    console.log(`[Grok] API success: ${entries.length} entries for ${uuid}`);
+                    return { uuid, title, platform: 'Grok', entries };
                 }
             } catch (e) {
-                console.warn('[GrokAdapter] API failed for', endpoint, ':', e.message);
-                continue; // Try next endpoint
+                console.warn('[Grok] API failed for', endpoint, ':', e.message);
+                continue;
             }
         }
 
-        // If this is the current conversation, we can use DOM
+        // DOM fallback for current conversation
         if (isCurrentConversation) {
-            console.log('[GrokAdapter] Falling back to DOM extraction for current conversation');
+            console.log('[Grok] Falling back to DOM extraction');
             return GrokAdapter.extractFromDOM(uuid);
         }
 
-        // For batch export of non-current conversations, we can't use DOM
-        console.error('[GrokAdapter] Cannot fetch conversation', uuid, '- API blocked and not current page');
+        console.error('[Grok] Cannot fetch conversation', uuid);
         return {
             uuid,
             title: 'Unable to fetch - API blocked',

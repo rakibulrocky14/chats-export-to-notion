@@ -132,7 +132,20 @@ GeminiBridge.init();
 
 const GeminiAdapter = {
     name: "Gemini",
-    apiBase: "https://gemini.google.com/_/BardChatUi/data/batchexecute",
+
+    // ============================================
+    // ENTERPRISE: Use platformConfig for endpoints
+    // ============================================
+    get config() {
+        return typeof platformConfig !== 'undefined'
+            ? platformConfig.getConfig('Gemini')
+            : null;
+    },
+
+    get apiBase() {
+        const config = this.config;
+        return config ? config.baseUrl + '/_/BardChatUi/data/batchexecute' : 'https://gemini.google.com/_/BardChatUi/data/batchexecute';
+    },
 
     // Cache for pagination cursors
     _cursorCache: [],
@@ -141,12 +154,74 @@ const GeminiAdapter = {
     _cacheTTL: 60000,
 
     extractUuid: (url) => {
-        // Format: /app/c_78e7183d7fa47176 or /app/uuid
+        // Try platformConfig patterns first
+        if (typeof platformConfig !== 'undefined') {
+            const uuid = platformConfig.extractUuid('Gemini', url);
+            if (uuid) return uuid;
+        }
+
+        // Fallback patterns
         const appMatch = url.match(/gemini\.google\.com\/app\/([a-zA-Z0-9_-]+)/);
         if (appMatch) return appMatch[1];
         const gemMatch = url.match(/gemini\.google\.com\/gem\/([a-zA-Z0-9_-]+)/);
         if (gemMatch) return gemMatch[1];
         return 'gemini_' + Date.now();
+    },
+
+    // ============================================
+    // ENTERPRISE: Anti-bot headers
+    // ============================================
+    _getHeaders: () => {
+        return {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin'
+        };
+    },
+
+    // ============================================
+    // ENTERPRISE: Get ALL threads (Load All feature)
+    // ============================================
+    getAllThreads: async function (progressCallback = null) {
+        try {
+            const result = await this.getThreads(1, 100);
+
+            // Update cache
+            GeminiAdapter._allThreadsCache = result.threads;
+            GeminiAdapter._cacheTimestamp = Date.now();
+
+            if (progressCallback) {
+                progressCallback(result.threads.length, false);
+            }
+
+            return result.threads;
+        } catch (error) {
+            console.error('[Gemini] getAllThreads failed:', error);
+            throw error;
+        }
+    },
+
+    // ============================================
+    // ENTERPRISE: Offset-based fetching
+    // ============================================
+    getThreadsWithOffset: async function (offset = 0, limit = 50) {
+        // Check cache validity
+        const cacheValid = GeminiAdapter._cacheTimestamp > Date.now() - GeminiAdapter._cacheTTL;
+
+        if (!cacheValid || GeminiAdapter._allThreadsCache.length === 0) {
+            await GeminiAdapter.getAllThreads();
+        }
+
+        const threads = GeminiAdapter._allThreadsCache.slice(offset, offset + limit);
+        return {
+            threads,
+            offset,
+            hasMore: offset + limit < GeminiAdapter._allThreadsCache.length,
+            total: GeminiAdapter._allThreadsCache.length
+        };
     },
 
     // ============================================
