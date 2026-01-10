@@ -12,6 +12,11 @@
     --accent-light: #818cf8;
     --success: #10b981;
     --danger: #ef4444;
+    /* Premium Gradients */
+    --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+    --gradient-shine: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.2) 50%, transparent 100%);
+    --glass-bg: rgba(255, 255, 255, 0.03);
+    --glass-border: rgba(255, 255, 255, 0.08);
 }
 
 * {
@@ -41,8 +46,33 @@ header {
     justify-content: space-between;
     align-items: center;
     padding: 14px 16px;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(99, 102, 241, 0.1) 100%);
+    border-bottom: 1px solid var(--glass-border);
+    position: relative;
+    overflow: hidden;
+}
+
+header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 200%;
+    height: 100%;
+    background: var(--gradient-shine);
+    animation: header-shine 3s ease-in-out infinite;
+}
+
+@keyframes header-shine {
+
+    0%,
+    100% {
+        transform: translateX(-50%);
+    }
+
+    50% {
+        transform: translateX(50%);
+    }
 }
 
 .logo {
@@ -190,15 +220,40 @@ main {
     border-radius: 10px;
     font-size: 13px;
     font-weight: 600;
-    background: var(--accent);
+    background: var(--gradient-primary);
+    background-size: 200% 200%;
     color: white;
     border: none;
     cursor: pointer;
-    transition: 0.2s;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+}
+
+.primary-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    transition: 0.5s;
 }
 
 .primary-btn:hover {
-    background: var(--accent-light);
+    background-position: 100% 0;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+}
+
+.primary-btn:hover::before {
+    left: 100%;
+}
+
+.primary-btn:active {
+    transform: translateY(0);
 }
 
 .primary-btn:disabled {
@@ -327,9 +382,21 @@ footer {
     gap: 8px;
     padding: 10px 16px;
     background: var(--bg-secondary);
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--glass-border);
     font-size: 10px;
     color: var(--text-secondary);
+    position: relative;
+}
+
+footer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--gradient-primary);
+    opacity: 0.5;
 }
 
 footer .separator {
@@ -337,8 +404,11 @@ footer .separator {
 }
 
 footer .enterprise {
-    color: var(--accent);
-    font-weight: 600;
+    color: transparent;
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    font-weight: 700;
 }
 
 /* ============================================ */
@@ -373,7 +443,7 @@ footer .enterprise {
     justify-content: center;
     gap: 6px;
     padding: 10px 16px 6px;
-    background: var(--bg-secondary);
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
 }
 
 .nav-btn {
@@ -382,29 +452,39 @@ footer .enterprise {
     justify-content: center;
     width: 36px;
     height: 36px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid transparent;
+    border-radius: 10px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
     color: var(--text-secondary);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-style: preserve-3d;
 }
 
 .nav-btn:hover {
     background: rgba(99, 102, 241, 0.15);
     color: var(--accent-light);
-    border-color: rgba(99, 102, 241, 0.3);
+    border-color: rgba(99, 102, 241, 0.4);
+    transform: translateY(-3px) scale(1.05);
+    box-shadow: 0 8px 20px rgba(99, 102, 241, 0.25);
 }
 
 .nav-btn.active {
     background: rgba(99, 102, 241, 0.2);
     color: var(--accent);
     border-color: var(--accent);
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.4), inset 0 0 10px rgba(99, 102, 241, 0.1);
 }
 
 .nav-btn svg {
     width: 18px;
     height: 18px;
+    transition: transform 0.2s ease;
+}
+
+.nav-btn:hover svg {
+    transform: scale(1.15);
 }
 
 /* Platform connection dots */
