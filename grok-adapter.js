@@ -96,50 +96,96 @@ const GrokAdapter = {
     },
 
     getThreadDetail: async (uuid) => {
-        // Try API first using discovered endpoint
-        try {
-            const response = await fetch(
-                `${GrokAdapter.apiBase}/conversations_v2/${uuid}?includeWorkspaces=true&includeTaskResult=true`,
-                { credentials: 'include', headers: { 'Accept': 'application/json' } }
-            );
+        // IMPORTANT: For batch export, we MUST use API - DOM only works for current conversation
+        const isCurrentConversation = window.location.href.includes(uuid);
 
-            if (response.ok) {
-                const data = await response.json();
+        // Common headers to avoid bot detection
+        const headers = {
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'X-Requested-With': 'XMLHttpRequest'
+        };
 
-                // Extract messages from response
-                const messages = data.messages || data.conversation?.messages ||
-                    data.data?.messages || data.turns || [];
+        // Try multiple API endpoints (Grok changes their API frequently)
+        const endpoints = [
+            `${GrokAdapter.apiBase}/conversations_v2/${uuid}?includeWorkspaces=true&includeTaskResult=true`,
+            `${GrokAdapter.apiBase}/conversation/${uuid}`,
+            `https://grok.com/rest/app-chat/conversation/${uuid}`,
+            `https://grok.com/api/conversation/${uuid}`
+        ];
 
-                if (Array.isArray(messages) && messages.length > 0) {
-                    const entries = [];
-                    let currentQuery = '';
+        for (const endpoint of endpoints) {
+            try {
+                console.log('[GrokAdapter] Trying API:', endpoint);
+                const response = await fetch(endpoint, { credentials: 'include', headers });
 
-                    messages.forEach(msg => {
-                        const role = msg.role || msg.sender || msg.author || msg.type;
-                        const content = msg.content || msg.text || msg.message ||
-                            (msg.parts ? msg.parts.join('\n') : '');
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('[GrokAdapter] API success for', uuid);
 
-                        if (role === 'user' || role === 'human') {
-                            currentQuery = content;
-                        } else if ((role === 'assistant' || role === 'grok' || role === 'bot') && currentQuery) {
-                            entries.push({ query: currentQuery, answer: content });
-                            currentQuery = '';
+                    // Extract messages from various response formats
+                    const messages = data.messages || data.conversation?.messages ||
+                        data.data?.messages || data.turns || data.items || [];
+
+                    if (Array.isArray(messages) && messages.length > 0) {
+                        const entries = [];
+                        let currentQuery = '';
+
+                        messages.forEach(msg => {
+                            const role = (msg.role || msg.sender || msg.author || msg.type || '').toLowerCase();
+                            const content = msg.content || msg.text || msg.message ||
+                                (msg.parts ? msg.parts.join('\n') : '');
+
+                            if (role === 'user' || role === 'human') {
+                                currentQuery = content;
+                            } else if ((role === 'assistant' || role === 'grok' || role === 'bot' || role === 'ai') && currentQuery) {
+                                entries.push({ query: currentQuery, answer: content });
+                                currentQuery = '';
+                            }
+                        });
+
+                        // Handle unpaired last message
+                        if (currentQuery && messages.length > 0) {
+                            const lastMsg = messages[messages.length - 1];
+                            const lastContent = lastMsg.content || lastMsg.text || '';
+                            if (lastContent && lastContent !== currentQuery) {
+                                entries.push({ query: currentQuery, answer: lastContent });
+                            }
                         }
-                    });
 
-                    const title = data.title || data.conversation?.title ||
-                        document.title?.replace(' | Grok', '').trim() ||
-                        'Grok Conversation';
+                        const title = data.title || data.conversation?.title ||
+                            data.name || 'Grok Conversation';
 
-                    return { uuid, title, platform: 'Grok', entries };
+                        return { uuid, title, platform: 'Grok', entries };
+                    }
+                } else if (response.status === 403 || response.status === 429) {
+                    console.warn('[GrokAdapter] API blocked (403/429) for:', endpoint);
+                    continue; // Try next endpoint
                 }
+            } catch (e) {
+                console.warn('[GrokAdapter] API failed for', endpoint, ':', e.message);
+                continue; // Try next endpoint
             }
-        } catch (e) {
-            // Fall through to DOM extraction
         }
 
-        // Fallback: DOM extraction
-        return GrokAdapter.extractFromDOM(uuid);
+        // If this is the current conversation, we can use DOM
+        if (isCurrentConversation) {
+            console.log('[GrokAdapter] Falling back to DOM extraction for current conversation');
+            return GrokAdapter.extractFromDOM(uuid);
+        }
+
+        // For batch export of non-current conversations, we can't use DOM
+        console.error('[GrokAdapter] Cannot fetch conversation', uuid, '- API blocked and not current page');
+        return {
+            uuid,
+            title: 'Unable to fetch - API blocked',
+            platform: 'Grok',
+            entries: [],
+            error: 'API access blocked - can only export current conversation'
+        };
     },
 
     extractFromDOM: (uuid) => {
