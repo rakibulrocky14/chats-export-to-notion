@@ -591,7 +591,7 @@ class ContentScriptHealthChecker {
             console.log('[HealthCheck] Content script not responding, injecting...');
 
             const tab = await chrome.tabs.get(tabId);
-            const supportedDomains = ['perplexity.ai', 'chatgpt.com', 'claude.ai'];
+            const supportedDomains = ['perplexity.ai', 'chatgpt.com', 'claude.ai', 'gemini.google.com', 'grok.com', 'x.com/i/grok', 'chat.deepseek.com'];
             const isSupported = supportedDomains.some(d => tab.url?.includes(d));
 
             if (!isSupported) {
@@ -702,7 +702,10 @@ async function findAllAIPlatformTabs() {
         { domain: 'perplexity.ai', name: 'Perplexity' },
         { domain: 'chatgpt.com', name: 'ChatGPT' },
         { domain: 'chat.openai.com', name: 'ChatGPT' },
-        { domain: 'claude.ai', name: 'Claude' }
+        { domain: 'claude.ai', name: 'Claude' },
+        { domain: 'gemini.google.com', name: 'Gemini' },
+        { domain: 'grok.com', name: 'Grok' },
+        { domain: 'chat.deepseek.com', name: 'DeepSeek' }
     ];
 
     allAITabs = [];
@@ -752,7 +755,10 @@ async function updatePlatformSelector() {
         const optgroup = document.createElement('optgroup');
         const emoji = platform === 'Perplexity' ? '🔮' :
             platform === 'ChatGPT' ? '🤖' :
-                platform === 'Claude' ? '🧠' : '💬';
+                platform === 'Claude' ? '🧠' :
+                    platform === 'Gemini' ? '✨' :
+                        platform === 'Grok' ? '❌' :
+                            platform === 'DeepSeek' ? '🔍' : '💬';
         optgroup.label = `${emoji} ${platform}`;
 
         platformTabs.forEach(tab => {
