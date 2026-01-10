@@ -2,10 +2,24 @@
 // Support for DeepSeek AI (chat.deepseek.com)
 // Enterprise-level implementation matching Perplexity quality
 // VERIFIED API: /api/v0/chat_session/fetch_page (discovered 2026-01-10)
+// NOW USES: platformConfig for centralized configuration
 
 const DeepSeekAdapter = {
     name: "DeepSeek",
-    apiBase: "https://chat.deepseek.com/api/v0",
+
+    // ============================================
+    // ENTERPRISE: Use platformConfig for endpoints
+    // ============================================
+    get config() {
+        return typeof platformConfig !== 'undefined'
+            ? platformConfig.getConfig('DeepSeek')
+            : null;
+    },
+
+    get apiBase() {
+        const config = this.config;
+        return config ? config.baseUrl + '/api/v0' : 'https://chat.deepseek.com/api/v0';
+    },
 
     // Cursor cache for pagination (enables Load All and offset-based fetching)
     _cursorCache: [],
@@ -14,6 +28,13 @@ const DeepSeekAdapter = {
     _cacheTTL: 60000, // 1 minute cache
 
     extractUuid: (url) => {
+        // Try platformConfig patterns first
+        if (typeof platformConfig !== 'undefined') {
+            const uuid = platformConfig.extractUuid('DeepSeek', url);
+            if (uuid) return uuid;
+        }
+
+        // Fallback patterns
         // Pattern 1: /a/chat/s/{uuid} or /chat/s/{uuid}
         const chatMatch = url.match(/chat\.deepseek\.com(?:\/a)?\/chat\/s?\/([a-zA-Z0-9-]+)/);
         if (chatMatch) return chatMatch[1];

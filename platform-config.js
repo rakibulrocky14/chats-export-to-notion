@@ -181,30 +181,45 @@ const PLATFORM_CONFIGS = {
         name: 'DeepSeek',
         baseUrl: 'https://chat.deepseek.com',
         versions: {
-            current: 'v1',
-            fallback: 'v1'
+            current: 'v0',
+            fallback: 'v1',
+            experimental: 'v2'
         },
         endpoints: {
             conversations: {
-                primary: '/api/v0/chat/list',
-                fallback: '/api/chat/list'
+                primary: '/api/v0/chat_session/fetch_page',
+                fallback: '/api/v0/chat/list',
+                params: () => '?lte_cursor.pinned=false'
             },
             conversationDetail: {
-                primary: '/api/v0/chat/{uuid}',
+                primary: '/api/v0/chat/{uuid}/history_message',
+                fallback: '/api/v0/chat/{uuid}',
+                params: () => '?lte_cursor.id='
+            },
+            chatSession: {
+                primary: '/api/v0/chat_session/{uuid}',
                 fallback: '/api/chat/{uuid}'
             }
         },
         patterns: {
             uuidExtract: [
-                /\/a\/chat\/([a-zA-Z0-9_-]+)/,
-                /\/chat\/([a-zA-Z0-9_-]+)/,
-                /[?&]s=([a-zA-Z0-9_-]+)/
+                /chat\.deepseek\.com(?:\/a)?\/chat\/s?\/([a-zA-Z0-9-]+)/,
+                /[?&](?:s|session|chat_session_id)=([a-zA-Z0-9-]+)/,
+                /([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i
             ]
         },
         dataFields: {
-            answer: ['content', 'text', 'response', 'assistant_message'],
-            query: ['content', 'text', 'user_message', 'query'],
-            title: ['title', 'name', 'summary']
+            answer: ['content', 'message.content', 'text', 'assistant_message', 'response'],
+            query: ['content', 'message.content', 'text', 'user_message', 'query', 'prompt'],
+            title: ['title', 'name', 'summary', 'first_query'],
+            role: ['role', 'message.role', 'sender', 'author']
+        },
+        // DeepSeek-specific settings
+        authTokenKey: 'userToken',
+        useCursorPagination: true,
+        rateLimit: {
+            requestsPerMinute: 30,
+            delayMs: 300
         }
     }
 };

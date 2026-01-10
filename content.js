@@ -606,35 +606,192 @@ const PerplexityAdapter = {
     }
 };
 
-// --- ChatGPT Implementation (Uses Platform Config) ---
+// --- ChatGPT Implementation (Enterprise Edition - Matches Perplexity Quality) ---
 const ChatGPTAdapter = {
     name: "ChatGPT",
+
+    // Cache for pagination
+    _allThreadsCache: [],
+    _cacheTimestamp: 0,
+    _cacheTTL: 60000, // 1 minute
 
     extractUuid: (url) => {
         return platformConfig.extractUuid('ChatGPT', url);
     },
 
-    getThreads: async (page, limit) => {
+    // ============================================
+    // ENTERPRISE: Get anti-bot headers
+    // ChatGPT uses OAI-Device-Id for bot detection
+    // ============================================
+    _getHeaders: () => {
+        const headers = {
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Content-Type': 'application/json',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin'
+        };
+
+        // Get OAI headers from localStorage (set by ChatGPT)
+        try {
+            const deviceId = localStorage.getItem('oai-device-id');
+            if (deviceId) headers['OAI-Device-Id'] = deviceId;
+            headers['OAI-Language'] = 'en-US';
+        } catch { }
+
+        return headers;
+    },
+
+    // ============================================
+    // ENTERPRISE: Retry with exponential backoff
+    // ============================================
+    _fetchWithRetry: async (url, options = {}, maxRetries = 3) => {
+        let lastError;
+        const headers = { ...ChatGPTAdapter._getHeaders(), ...options.headers };
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                const response = await fetch(url, {
+                    credentials: 'include',
+                    headers,
+                    ...options
+                });
+
+                if (response.ok) return response;
+
+                if (response.status === 401 || response.status === 403) {
+                    throw new Error('Authentication required - please login to ChatGPT');
+                }
+
+                if (response.status === 429) {
+                    // Rate limited - wait longer
+                    const waitTime = Math.pow(2, attempt + 2) * 1000;
+                    console.warn(`[ChatGPT] Rate limited, waiting ${waitTime}ms`);
+                    await new Promise(r => setTimeout(r, waitTime));
+                    continue;
+                }
+
+                lastError = new Error(`HTTP ${response.status}`);
+            } catch (e) {
+                lastError = e;
+            }
+
+            if (attempt < maxRetries - 1) {
+                await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+            }
+        }
+        throw lastError;
+    },
+
+    // ============================================
+    // ENTERPRISE: Get ALL threads (Load All feature)
+    // ============================================
+    getAllThreads: async (progressCallback = null) => {
+        const allThreads = [];
+        let offset = 0;
+        const limit = 50;
+        const seenIds = new Set();
+
+        try {
+            do {
+                const result = await ChatGPTAdapter.getThreadsWithOffset(offset, limit);
+
+                result.threads.forEach(t => {
+                    if (!seenIds.has(t.uuid)) {
+                        seenIds.add(t.uuid);
+                        allThreads.push(t);
+                    }
+                });
+
+                if (progressCallback) {
+                    progressCallback(allThreads.length, result.hasMore);
+                }
+
+                offset += limit;
+
+                if (!result.hasMore) break;
+                if (allThreads.length > 5000) break; // Safety limit
+
+                await new Promise(r => setTimeout(r, 300)); // Rate limit
+
+            } while (true);
+
+            // Update cache
+            ChatGPTAdapter._allThreadsCache = allThreads;
+            ChatGPTAdapter._cacheTimestamp = Date.now();
+
+            return allThreads;
+        } catch (error) {
+            console.error('[ChatGPT] getAllThreads failed:', error);
+            throw error;
+        }
+    },
+
+    // ============================================
+    // ENTERPRISE: Offset-based fetching
+    // ============================================
+    getThreadsWithOffset: async (offset = 0, limit = 50) => {
+        // Check cache validity
+        const cacheValid = ChatGPTAdapter._cacheTimestamp > Date.now() - ChatGPTAdapter._cacheTTL;
+
+        if (cacheValid && ChatGPTAdapter._allThreadsCache.length > 0 && offset < ChatGPTAdapter._allThreadsCache.length) {
+            const threads = ChatGPTAdapter._allThreadsCache.slice(offset, offset + limit);
+            return {
+                threads,
+                offset,
+                hasMore: offset + limit < ChatGPTAdapter._allThreadsCache.length,
+                total: ChatGPTAdapter._allThreadsCache.length
+            };
+        }
+
         try {
             const baseUrl = platformConfig.getBaseUrl('ChatGPT');
             const endpoint = platformConfig.buildEndpoint('ChatGPT', 'conversations');
-            const url = `${baseUrl}${endpoint}?offset=${(page - 1) * limit}&limit=${limit}&order=updated`;
+            const url = `${baseUrl}${endpoint}?offset=${offset}&limit=${limit}&order=updated`;
 
-            const response = await fetch(url, { credentials: "include" });
+            const response = await ChatGPTAdapter._fetchWithRetry(url);
+            const data = await response.json();
 
-            if (!response.ok) {
-                platformConfig.markEndpointFailed('ChatGPT', 'conversations');
-                throw new Error(`API Error: ${response.status}`);
+            const threads = (data.items || []).map(t => ({
+                uuid: t.id,
+                title: DataExtractor.extractTitle(t, 'ChatGPT'),
+                last_query_datetime: t.update_time,
+                platform: 'ChatGPT'
+            }));
+
+            return {
+                threads,
+                offset,
+                hasMore: data.has_missing_conversations || threads.length === limit,
+                total: data.total || -1
+            };
+        } catch (error) {
+            console.error('[ChatGPT] getThreadsWithOffset error:', error);
+            throw error;
+        }
+    },
+
+    // Standard page-based (backwards compatible)
+    getThreads: async (page, limit) => {
+        try {
+            // Check NetworkInterceptor first
+            if (window.NetworkInterceptor && window.NetworkInterceptor.getChatList().length > 0) {
+                const all = window.NetworkInterceptor.getChatList();
+                const start = (page - 1) * limit;
+                return {
+                    threads: all.slice(start, start + limit),
+                    hasMore: start + limit < all.length,
+                    page
+                };
             }
 
-            const data = await response.json();
+            const offset = (page - 1) * limit;
+            const result = await ChatGPTAdapter.getThreadsWithOffset(offset, limit);
+
             return {
-                threads: (data.items || []).map(t => ({
-                    uuid: t.id,
-                    title: DataExtractor.extractTitle(t, 'ChatGPT'),
-                    last_query_datetime: t.update_time
-                })),
-                hasMore: !!data.has_missing_conversations,
+                threads: result.threads,
+                hasMore: result.hasMore,
                 page
             };
         } catch (error) {
@@ -643,31 +800,44 @@ const ChatGPTAdapter = {
         }
     },
 
+    // ============================================
+    // ENTERPRISE: Resilient thread detail fetching
+    // ============================================
     getThreadDetail: async (uuid) => {
-        // Try API first
+        // Strategy 1: API fetch with retry
         try {
             const baseUrl = platformConfig.getBaseUrl('ChatGPT');
             const endpoint = platformConfig.buildEndpoint('ChatGPT', 'conversationDetail', { uuid });
             const url = `${baseUrl}${endpoint}`;
 
-            const response = await fetch(url, { credentials: "include" });
+            const response = await ChatGPTAdapter._fetchWithRetry(url);
+            const data = await response.json();
+            const entries = transformChatGPTData(data);
 
-            if (response.ok) {
-                const data = await response.json();
-                const entries = transformChatGPTData(data);
-                if (entries.length > 0) {
-                    console.log(`[ChatGPT] API success: ${entries.length} entries`);
-                    return { entries: entries, title: data.title };
-                }
+            if (entries.length > 0) {
+                console.log(`[ChatGPT] API success: ${entries.length} entries for ${uuid}`);
+                return { uuid, entries, title: data.title, platform: 'ChatGPT' };
             }
-
-            console.log('[ChatGPT] API failed or empty, trying DOM extraction');
         } catch (error) {
-            console.log('[ChatGPT] API error, trying DOM extraction:', error.message);
+            console.warn('[ChatGPT] API failed:', error.message);
         }
 
-        // DOM Fallback
-        return ChatGPTAdapter.extractFromDOM(uuid);
+        // Strategy 2: Check if this is the current conversation
+        const isCurrentConversation = window.location.href.includes(uuid);
+        if (isCurrentConversation) {
+            console.log('[ChatGPT] Falling back to DOM extraction for current conversation');
+            return ChatGPTAdapter.extractFromDOM(uuid);
+        }
+
+        // Strategy 3: Return error for non-current conversations
+        console.error('[ChatGPT] Cannot fetch conversation', uuid, '- API failed and not current page');
+        return {
+            uuid,
+            title: 'Unable to fetch - API error',
+            platform: 'ChatGPT',
+            entries: [],
+            error: 'API access failed - can only export current conversation'
+        };
     },
 
     extractFromDOM: (uuid) => {
@@ -771,9 +941,12 @@ const ChatGPTAdapter = {
         return {
             uuid: uuid,
             title: title,
+            platform: 'ChatGPT',
             entries: messages.filter(m => m.query || m.answer)
         };
-    }
+    },
+
+    getSpaces: async () => []
 };
 
 // --- Claude Implementation (Uses Platform Config) ---
