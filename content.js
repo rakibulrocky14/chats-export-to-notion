@@ -3,6 +3,51 @@
 
 console.log("OmniExporter AI Content Script Active");
 
+// ============================================
+// SECURITY UTILITIES (Audit Fix)
+// ============================================
+const SecurityUtils = {
+    // Validate UUID format to prevent injection
+    isValidUuid: (uuid) => {
+        if (!uuid || typeof uuid !== 'string') return false;
+        // Allow alphanumeric, underscore, hyphen, 8-128 chars
+        return /^[a-zA-Z0-9_-]{8,128}$/.test(uuid);
+    },
+
+    // Sanitize HTML to prevent XSS
+    sanitizeHtml: (str) => {
+        if (typeof str !== 'string') return '';
+        return str.replace(/[&<>"']/g, (m) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[m]);
+    },
+
+    // Fetch with timeout to prevent hanging
+    fetchWithTimeout: async (url, options = {}, timeoutMs = 30000) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
+            return response;
+        } finally {
+            clearTimeout(timeout);
+        }
+    },
+
+    // Validate API response structure
+    isValidApiResponse: (data) => {
+        return data && typeof data === 'object';
+    }
+};
+
 class ContentScriptManager {
     constructor() {
         this.messageHandler = null;

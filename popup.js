@@ -1,6 +1,24 @@
 // OmniExporter AI - Popup JavaScript
 // Phase 9: Multi-Platform Export v5.0
 
+// ============================================
+// GLOBAL ERROR HANDLER (Audit Fix)
+// ============================================
+window.addEventListener('error', (event) => {
+    console.error('[OmniExporter] Uncaught error:', event.error);
+    // Show toast if available
+    if (typeof OmniToast !== 'undefined') {
+        OmniToast.show('An error occurred. Check console for details.', 'error');
+    }
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('[OmniExporter] Unhandled promise rejection:', event.reason);
+    if (typeof OmniToast !== 'undefined') {
+        OmniToast.show('Operation failed. Please try again.', 'error');
+    }
+});
+
 let currentPlatform = "Unknown";
 let selectedExportFormat = "markdown";
 

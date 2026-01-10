@@ -158,12 +158,17 @@ async function performAutoSync() {
         console.log("[AutoSync] Starting incremental sync...");
 
         try {
-            // Find AI platform tabs
+            // Find AI platform tabs - ALL 6 PLATFORMS
             const tabs = await chrome.tabs.query({
                 url: [
                     "https://www.perplexity.ai/*",
                     "https://chatgpt.com/*",
-                    "https://claude.ai/*"
+                    "https://chat.openai.com/*",
+                    "https://claude.ai/*",
+                    "https://gemini.google.com/*",
+                    "https://grok.com/*",
+                    "https://x.com/i/grok/*",
+                    "https://chat.deepseek.com/*"
                 ]
             });
 
@@ -174,8 +179,12 @@ async function performAutoSync() {
 
             const tab = tabs[0];
             const platform = tab.url.includes('perplexity') ? 'Perplexity'
-                : tab.url.includes('chatgpt') ? 'ChatGPT'
-                    : 'Claude';
+                : tab.url.includes('chatgpt') || tab.url.includes('openai') ? 'ChatGPT'
+                    : tab.url.includes('claude') ? 'Claude'
+                        : tab.url.includes('gemini') ? 'Gemini'
+                            : tab.url.includes('grok') || tab.url.includes('x.com') ? 'Grok'
+                                : tab.url.includes('deepseek') ? 'DeepSeek'
+                                    : 'Unknown';
 
             // Get checkpoint for this platform
             const checkpoint = await getSyncCheckpoint(platform);
@@ -405,7 +414,12 @@ chrome.runtime.onInstalled.addListener(() => {
         documentUrlPatterns: [
             'https://www.perplexity.ai/*',
             'https://chatgpt.com/*',
-            'https://claude.ai/*'
+            'https://chat.openai.com/*',
+            'https://claude.ai/*',
+            'https://gemini.google.com/*',
+            'https://grok.com/*',
+            'https://x.com/i/grok/*',
+            'https://chat.deepseek.com/*'
         ]
     });
 });

@@ -58,6 +58,19 @@ class InputSanitizer {
         const cleanId = id.replace(/-/g, '');
         return /^[a-f0-9]{32}$/i.test(cleanId);
     }
+
+    // Validate Notion API key format (Audit Fix)
+    static validateNotionKey(key) {
+        if (!key || typeof key !== 'string') return false;
+        // Notion keys start with 'secret_' and are alphanumeric
+        return /^secret_[a-zA-Z0-9]{43}$/.test(key) || /^ntn_[a-zA-Z0-9]+$/.test(key);
+    }
+
+    // Validate UUID format
+    static validateUuid(uuid) {
+        if (!uuid || typeof uuid !== 'string') return false;
+        return /^[a-zA-Z0-9_-]{8,128}$/.test(uuid);
+    }
 }
 
 /**
