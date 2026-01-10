@@ -883,29 +883,34 @@ async function sendMessageWithTimeout(tabId, message, timeoutMs = 20000) {
 // PHASE 5 FIX 5: CONNECTION STATUS MONITORING
 // ============================================
 async function monitorConnectionStatus() {
-    const statusEl = document.getElementById('connectionStatus');
-    if (!statusEl) return;
+    try {
+        const statusEl = document.getElementById('connectionStatus');
+        if (!statusEl) return;
 
-    const tab = await getAITab();
-    if (!tab) {
-        statusEl.style.display = 'none';
-        return;
-    }
+        const tab = await getAITab();
+        if (!tab) {
+            statusEl.style.display = 'none';
+            return;
+        }
 
-    statusEl.style.display = 'flex';
+        statusEl.style.display = 'flex';
 
-    const result = await healthChecker.testConnection(tab.id);
+        const result = await healthChecker.testConnection(tab.id);
 
-    if (result.connected) {
-        statusEl.classList.add('connected');
-        statusEl.querySelector('.status-text').textContent = 'Connected';
-        const responseTimeEl = statusEl.querySelector('.response-time');
-        if (responseTimeEl) responseTimeEl.textContent = `${result.responseTime}ms`;
-    } else {
-        statusEl.classList.remove('connected');
-        statusEl.querySelector('.status-text').textContent = 'Disconnected';
-        const responseTimeEl = statusEl.querySelector('.response-time');
-        if (responseTimeEl) responseTimeEl.textContent = result.error || '';
+        if (result.connected) {
+            statusEl.classList.add('connected');
+            statusEl.querySelector('.status-text').textContent = 'Connected';
+            const responseTimeEl = statusEl.querySelector('.response-time');
+            if (responseTimeEl) responseTimeEl.textContent = `${result.responseTime}ms`;
+        } else {
+            statusEl.classList.remove('connected');
+            statusEl.querySelector('.status-text').textContent = 'Disconnected';
+            const responseTimeEl = statusEl.querySelector('.response-time');
+            if (responseTimeEl) responseTimeEl.textContent = result.error || '';
+        }
+    } catch (e) {
+        // Silently ignore connection errors - this is expected when tabs close
+        // console.log('[Monitor] Connection check failed:', e.message);
     }
 }
 // ============================================
