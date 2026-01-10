@@ -34,40 +34,54 @@
 
         <!-- Platform Navigation Bar -->
         <nav class="platform-nav">
-            <button class="nav-btn" data-platform="perplexity" title="Perplexity">
+            <button class="nav-btn tooltip-wrapper" data-platform="perplexity" title="Perplexity">
+                <span class="connection-dot" id="dot-perplexity"></span>
                 <svg viewBox="0 0 24 24" width="18" height="18">
                     <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
                     <path d="M12 6v12M6 12h12" stroke="currentColor" stroke-width="2" />
                 </svg>
+                <span class="tooltip">Perplexity</span>
             </button>
-            <button class="nav-btn" data-platform="chatgpt" title="ChatGPT">
+            <button class="nav-btn tooltip-wrapper" data-platform="chatgpt" title="ChatGPT">
+                <span class="connection-dot" id="dot-chatgpt"></span>
                 <svg viewBox="0 0 24 24" width="18" height="18">
                     <path fill="currentColor"
                         d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
                 </svg>
+                <span class="tooltip">ChatGPT</span>
             </button>
-            <button class="nav-btn" data-platform="claude" title="Claude">
+            <button class="nav-btn tooltip-wrapper" data-platform="claude" title="Claude">
+                <span class="connection-dot" id="dot-claude"></span>
                 <svg viewBox="0 0 24 24" width="18" height="18">
                     <path fill="currentColor" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                 </svg>
+                <span class="tooltip">Claude</span>
             </button>
-            <button class="nav-btn" data-platform="gemini" title="Gemini">
+            <button class="nav-btn tooltip-wrapper" data-platform="gemini" title="Gemini">
+                <span class="connection-dot" id="dot-gemini"></span>
+                <span class="feature-badge new">NEW</span>
                 <svg viewBox="0 0 24 24" width="18" height="18">
                     <path fill="currentColor"
                         d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4zm0 10.99h6c-.53 4.12-3.28 7.79-6 8.94V13H6V7.07l6-3v8.92z" />
                 </svg>
+                <span class="tooltip">Gemini (100+ messages!)</span>
             </button>
-            <button class="nav-btn" data-platform="grok" title="Grok">
+            <button class="nav-btn tooltip-wrapper" data-platform="grok" title="Grok">
+                <span class="connection-dot" id="dot-grok"></span>
                 <svg viewBox="0 0 24 24" width="18" height="18">
                     <path fill="currentColor"
                         d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                 </svg>
+                <span class="tooltip">Grok</span>
             </button>
-            <button class="nav-btn" data-platform="deepseek" title="DeepSeek">
+            <button class="nav-btn tooltip-wrapper" data-platform="deepseek" title="DeepSeek">
+                <span class="connection-dot" id="dot-deepseek"></span>
+                <span class="feature-badge hot">HOT</span>
                 <svg viewBox="0 0 24 24" width="18" height="18">
                     <path fill="currentColor"
                         d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
                 </svg>
+                <span class="tooltip">DeepSeek</span>
             </button>
         </nav>
 
@@ -75,8 +89,8 @@
         <main>
             <div class="quick-actions">
                 <!-- Export Dropdown -->
-                <div class="export-dropdown">
-                    <button id="exportBtn" class="primary-btn">
+                <div class="export-dropdown btn-with-badge">
+                    <button id="exportBtn" class="primary-btn premium">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -108,26 +122,34 @@
                     </div>
                 </div>
 
-                <button id="saveToNotionBtn" class="primary-btn notion-btn">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                        <path d="M8 2v4"></path>
-                        <path d="M16 2v4"></path>
-                        <path d="M12 11v6"></path>
-                        <path d="M9 14h6"></path>
-                    </svg>
-                    <span>Save to Notion</span>
-                </button>
+                <div class="btn-with-badge">
+                    <button id="saveToNotionBtn" class="primary-btn notion-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z">
+                            </path>
+                            <path d="M8 2v4"></path>
+                            <path d="M16 2v4"></path>
+                            <path d="M12 11v6"></path>
+                            <path d="M9 14h6"></path>
+                        </svg>
+                        <span>Save to Notion</span>
+                    </button>
+                </div>
 
-                <button id="openDashboard" class="secondary-btn">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="14" width="7" height="7"></rect>
-                        <rect x="3" y="14" width="7" height="7"></rect>
-                    </svg>
-                    <span>Open Dashboard</span>
-                </button>
+                <div class="btn-with-badge">
+                    <span class="feature-badge recommended">★</span>
+                    <button id="openDashboard" class="secondary-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                        <span>Open Dashboard</span>
+                    </button>
+                </div>
             </div>
 
 

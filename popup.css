@@ -407,6 +407,163 @@ footer .enterprise {
     height: 18px;
 }
 
+/* Platform connection dots */
+.nav-btn {
+    position: relative;
+}
+
+.nav-btn .connection-dot {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    border: 1px solid var(--bg-secondary);
+    z-index: 1;
+}
+
+.nav-btn .connection-dot.connected {
+    background: var(--success);
+    animation: pulse-dot 2s infinite;
+}
+
+.nav-btn .connection-dot.checking {
+    background: #f59e0b;
+    animation: pulse-dot 0.5s infinite;
+}
+
+/* ============================================ */
+/* FEATURE BADGES (from faltu2.txt) */
+/* ============================================ */
+.feature-badge {
+    position: absolute;
+    top: -6px;
+    right: -4px;
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-weight: 600;
+    z-index: 10;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    animation: badgePulse 2s ease-in-out infinite;
+}
+
+.feature-badge.recommended {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+}
+
+.feature-badge.hot {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+}
+
+.feature-badge.new {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+}
+
+.feature-badge.beta {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+}
+
+@keyframes badgePulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.05);
+    }
+}
+
+/* Enhanced button with badge container */
+.btn-with-badge {
+    position: relative;
+}
+
+/* ============================================ */
+/* PREMIUM BUTTON GRADIENTS */
+/* ============================================ */
+.primary-btn.premium {
+    background: linear-gradient(135deg, var(--accent) 0%, #4f46e5 100%);
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+}
+
+.primary-btn.premium:hover {
+    background: linear-gradient(135deg, var(--accent-light) 0%, #6366f1 100%);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+    transform: translateY(-1px);
+}
+
+/* Glassmorphism card */
+.glass-card {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ============================================ */
+/* TOOLTIPS (from faltu2.txt) */
+/* ============================================ */
+.tooltip-wrapper {
+    position: relative;
+    display: inline-flex;
+}
+
+.tooltip-wrapper .tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-4px);
+    padding: 6px 10px;
+    background: #1f2937;
+    color: white;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 6px;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.tooltip-wrapper .tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: #1f2937;
+}
+
+.tooltip-wrapper:hover .tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(-8px);
+}
+
+/* ============================================ */
+/* ENHANCED PLATFORM NAV WITH ICONS */
+/* ============================================ */
+.platform-nav {
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, rgba(22, 22, 26, 0.95) 100%);
+    border-bottom: 1px solid var(--border);
+}
+
 /* ============================================ */
 /* EXPORT DROPDOWN */
 /* ============================================ */

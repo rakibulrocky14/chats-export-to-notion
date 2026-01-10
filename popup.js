@@ -346,6 +346,26 @@ function updateNavBarActive(platform) {
             btn.classList.add('active');
         }
     });
+
+    // Update connection dots
+    updatePlatformConnectionDots(platformMap[platform]);
+}
+
+// ============================================
+// PLATFORM CONNECTION DOTS (from reference files)
+// ============================================
+function updatePlatformConnectionDots(activePlatform) {
+    const platforms = ['perplexity', 'chatgpt', 'claude', 'gemini', 'grok', 'deepseek'];
+
+    platforms.forEach(platform => {
+        const dot = document.getElementById(`dot-${platform}`);
+        if (dot) {
+            dot.classList.remove('connected', 'checking');
+            if (platform === activePlatform) {
+                dot.classList.add('connected');
+            }
+        }
+    });
 }
 
 // ============================================
