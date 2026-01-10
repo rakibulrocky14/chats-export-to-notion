@@ -2,6 +2,152 @@
 // Support for Google Gemini (gemini.google.com)
 // VERIFIED API: batchexecute with rpcids MaZiqc (list) and hNvQHb (messages)
 // Discovered via Chrome DevTools MCP 2026-01-10
+// FEATURE: XHR interceptor to increase message limit from 20 to 100
+
+// =============================================
+// XHR INTERCEPTOR - Increase message fetch limit
+// From Reference: faltu5.txt
+// =============================================
+class GeminiXHRInterceptor {
+    constructor() {
+        this.originalXHROpen = null;
+        this.originalXHRSend = null;
+        this.isHooked = false;
+        this.targetUrl = "/_/BardChatUi/data/batchexecute";
+        this.targetAction = "hNvQHb";
+    }
+
+    start() {
+        if (this.isHooked) return;
+        this.hookXHR();
+        this.isHooked = true;
+        console.log('[GeminiAdapter] XHR interceptor started - message limit increased to 100');
+    }
+
+    stop() {
+        if (!this.isHooked) return;
+        this.unhookXHR();
+        this.isHooked = false;
+    }
+
+    isGeminiAPIRequest(url) {
+        return url && url.includes(this.targetUrl);
+    }
+
+    hasTargetRpcids(url, targetRpcid) {
+        try {
+            const urlObj = new URL(url, window.location.origin);
+            return urlObj.searchParams.get("rpcids") === targetRpcid;
+        } catch {
+            return false;
+        }
+    }
+
+    // Modify the f.req field to change message limit from 20 to 100
+    modifyFreqField(freqStr) {
+        try {
+            const parsed = JSON.parse(freqStr);
+            let modified = false;
+
+            const result = this.traverseAndModify(parsed, (item) => {
+                // Look for hNvQHb action with message limit
+                if (Array.isArray(item) && item.length >= 2 &&
+                    item[0] === this.targetAction && typeof item[1] === "string") {
+                    try {
+                        const innerPayload = JSON.parse(item[1]);
+                        // innerPayload[1] is the message limit (usually 20)
+                        if (Array.isArray(innerPayload) && innerPayload.length > 1 &&
+                            typeof innerPayload[1] === "number" && innerPayload[1] <= 20) {
+                            innerPayload[1] = 100; // Increase to 100
+                            item[1] = JSON.stringify(innerPayload);
+                            modified = true;
+                            console.log('[GeminiAdapter] Increased message limit to 100');
+                        }
+                    } catch { }
+                }
+                return item;
+            });
+
+            return modified ? JSON.stringify(result) : freqStr;
+        } catch {
+            return freqStr;
+        }
+    }
+
+    traverseAndModify(obj, callback) {
+        if (Array.isArray(obj)) {
+            return obj.map(item => {
+                const modified = callback(item);
+                return this.traverseAndModify(modified, callback);
+            });
+        } else if (typeof obj === "object" && obj !== null) {
+            const result = {};
+            for (const [key, value] of Object.entries(obj)) {
+                result[key] = this.traverseAndModify(value, callback);
+            }
+            return result;
+        }
+        return obj;
+    }
+
+    modifyRequestBody(body) {
+        if (!body || typeof body !== "string" || !body.includes("f.req=")) {
+            return body;
+        }
+
+        try {
+            const params = new URLSearchParams(body);
+            const freqValue = params.get("f.req");
+            if (freqValue) {
+                const modified = this.modifyFreqField(freqValue);
+                params.set("f.req", modified);
+                return params.toString();
+            }
+        } catch (e) {
+            console.error('[GeminiAdapter] Error modifying request:', e);
+        }
+        return body;
+    }
+
+    hookXHR() {
+        this.originalXHROpen = XMLHttpRequest.prototype.open;
+        this.originalXHRSend = XMLHttpRequest.prototype.send;
+        const interceptor = this;
+
+        XMLHttpRequest.prototype.open = function (method, url, async, user, password) {
+            this._interceptor_url = url;
+            return interceptor.originalXHROpen.call(this, method, url, async !== false, user || null, password || null);
+        };
+
+        XMLHttpRequest.prototype.send = function (body) {
+            const url = this._interceptor_url;
+            if (url && interceptor.isGeminiAPIRequest(url) &&
+                interceptor.hasTargetRpcids(url, interceptor.targetAction)) {
+                const modifiedBody = interceptor.modifyRequestBody(body);
+                if (modifiedBody !== body) {
+                    return interceptor.originalXHRSend.call(this, modifiedBody);
+                }
+            }
+            return interceptor.originalXHRSend.call(this, body);
+        };
+    }
+
+    unhookXHR() {
+        if (this.originalXHROpen) {
+            XMLHttpRequest.prototype.open = this.originalXHROpen;
+        }
+        if (this.originalXHRSend) {
+            XMLHttpRequest.prototype.send = this.originalXHRSend;
+        }
+    }
+}
+
+// Initialize interceptor on Gemini pages
+const geminiInterceptor = new GeminiXHRInterceptor();
+if (window.location.hostname.includes('gemini.google.com')) {
+    geminiInterceptor.start();
+    window.addEventListener('beforeunload', () => geminiInterceptor.stop());
+}
 
 const GeminiAdapter = {
     name: "Gemini",

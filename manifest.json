@@ -60,6 +60,7 @@
             "js": [
                 "network-interceptor.js",
                 "platform-config.js",
+                "gemini-inject.js",
                 "gemini-adapter.js",
                 "content.js"
             ],
