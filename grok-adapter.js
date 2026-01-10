@@ -22,8 +22,8 @@ const GrokAdapter = {
         return null;
     },
 
-    // Try to get list of conversations
-    getThreads: async (page = 0, limit = 20) => {
+    // Try to get list of conversations - VERIFIED API (discovered via chrome-devtools-mcp)
+    getThreads: async (page = 0, limit = 50) => {
         // Check if NetworkInterceptor captured chat list
         if (window.NetworkInterceptor && window.NetworkInterceptor.getChatList().length > 0) {
             return window.NetworkInterceptor.getChatList().slice(0, limit);
@@ -31,43 +31,55 @@ const GrokAdapter = {
 
         const threads = [];
 
-        // Try API endpoints that might list conversations
-        const listEndpoints = [
-            '/conversations',
-            '/conversations_v2',
-            '/chats',
-            '/history'
-        ];
+        // VERIFIED ENDPOINT: /rest/app-chat/conversations (discovered 2026-01-10)
+        try {
+            const response = await fetch(`${GrokAdapter.apiBase}/conversations`, {
+                credentials: 'include',
+                headers: { 'Accept': 'application/json' }
+            });
 
-        for (const endpoint of listEndpoints) {
-            try {
-                const response = await fetch(`${GrokAdapter.apiBase}${endpoint}`, {
-                    credentials: 'include',
-                    headers: { 'Accept': 'application/json' }
-                });
+            if (response.ok) {
+                const data = await response.json();
+                const chats = data.conversations || data.data || data.items || [];
 
-                if (response.ok) {
-                    const data = await response.json();
-                    const chats = data.conversations || data.chats || data.data || [];
-
-                    if (Array.isArray(chats) && chats.length > 0) {
-                        chats.slice(0, limit).forEach(chat => {
-                            threads.push({
-                                uuid: chat.id || chat.conversationId || chat.uuid,
-                                title: chat.title || chat.name || 'Grok Chat',
-                                platform: 'Grok',
-                                last_query_datetime: chat.updatedAt || chat.createdAt || new Date().toISOString()
-                            });
+                if (Array.isArray(chats) && chats.length > 0) {
+                    chats.slice(0, limit).forEach(chat => {
+                        threads.push({
+                            uuid: chat.id || chat.conversationId || chat.uuid,
+                            title: chat.title || chat.name || 'Grok Chat',
+                            platform: 'Grok',
+                            last_query_datetime: chat.updatedAt || chat.createdAt || new Date().toISOString()
                         });
-                        break;
-                    }
+                    });
+                    return threads;
                 }
-            } catch (e) {
-                // Continue to next endpoint
             }
+        } catch (e) {
+            console.warn('[GrokAdapter] API fetch failed (may have CAPTCHA), trying DOM fallback');
         }
 
-        // Fallback: return current chat
+        // DOM Fallback: Parse sidebar chat items (useful when CAPTCHA blocks API)
+        try {
+            const chatItems = document.querySelectorAll(
+                '[class*="conversation-item"], [class*="chat-item"], a[href*="/conversation/"], [data-testid="conversation"]'
+            );
+            chatItems.forEach((item, i) => {
+                if (i >= limit) return;
+                const href = item.getAttribute('href') || '';
+                const uuidMatch = href.match(/\/conversation\/([a-zA-Z0-9_-]+)/) ||
+                    href.match(/([a-f0-9-]{36})/i);
+                if (uuidMatch) {
+                    threads.push({
+                        uuid: uuidMatch[1],
+                        title: item.innerText?.trim()?.slice(0, 100) || 'Grok Chat',
+                        platform: 'Grok',
+                        last_query_datetime: new Date().toISOString()
+                    });
+                }
+            });
+        } catch (e) { }
+
+        // Final fallback: current chat
         if (threads.length === 0) {
             const currentUuid = GrokAdapter.extractUuid(window.location.href);
             if (currentUuid) {

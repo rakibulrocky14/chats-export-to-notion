@@ -12,20 +12,48 @@ const GeminiAdapter = {
         return 'gemini_' + Date.now();
     },
 
-    getThreads: async function (page = 0, limit = 20) {
+    // Get thread list - Gemini uses complex batchexecute API, DOM fallback preferred
+    // VERIFIED SELECTORS: div.conversation, a[href*="/app/"] (discovered 2026-01-10)
+    getThreads: async function (page = 0, limit = 50) {
         // Check if NetworkInterceptor captured chat list
         if (window.NetworkInterceptor && window.NetworkInterceptor.getChatList().length > 0) {
             return window.NetworkInterceptor.getChatList().slice(0, limit);
         }
 
         const threads = [];
-        const currentUuid = this.extractUuid(window.location.href);
-        threads.push({
-            uuid: currentUuid,
-            title: document.title?.replace(' - Gemini', '').replace('Google Gemini', '').trim() || 'Gemini Chat',
-            platform: 'Gemini',
-            last_query_datetime: new Date().toISOString()
-        });
+
+        // DOM Fallback: Parse sidebar chat items (recommended for Gemini)
+        try {
+            // Discovered selectors from browser analysis
+            const chatItems = document.querySelectorAll(
+                'div.conversation, a[href*="/app/"], [class*="conversation-item"], mat-list-item a'
+            );
+            chatItems.forEach((item, i) => {
+                if (i >= limit) return;
+                const href = item.getAttribute('href') || '';
+                const uuidMatch = href.match(/\/app\/([a-zA-Z0-9_-]+)/) ||
+                    href.match(/\/gem\/([a-zA-Z0-9_-]+)/);
+                if (uuidMatch) {
+                    threads.push({
+                        uuid: uuidMatch[1],
+                        title: item.innerText?.trim()?.slice(0, 100) || 'Gemini Chat',
+                        platform: 'Gemini',
+                        last_query_datetime: new Date().toISOString()
+                    });
+                }
+            });
+        } catch (e) { }
+
+        // Final fallback: current chat
+        if (threads.length === 0) {
+            const currentUuid = this.extractUuid(window.location.href);
+            threads.push({
+                uuid: currentUuid,
+                title: document.title?.replace(' - Gemini', '').replace('Google Gemini', '').trim() || 'Gemini Chat',
+                platform: 'Gemini',
+                last_query_datetime: new Date().toISOString()
+            });
+        }
         return threads;
     },
 

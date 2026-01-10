@@ -22,8 +22,8 @@ const DeepSeekAdapter = {
         return null;
     },
 
-    // Try to get list of chat sessions
-    getThreads: async (page = 0, limit = 20) => {
+    // Try to get list of chat sessions - VERIFIED API ENDPOINT (discovered via chrome-devtools-mcp)
+    getThreads: async (page = 0, limit = 50) => {
         // Check if NetworkInterceptor captured chat list
         if (window.NetworkInterceptor && window.NetworkInterceptor.getChatList().length > 0) {
             return window.NetworkInterceptor.getChatList().slice(0, limit);
@@ -31,45 +31,60 @@ const DeepSeekAdapter = {
 
         const threads = [];
 
-        // Try API endpoints that might list chats
-        const listEndpoints = [
-            '/chat/list',
-            '/chat/sessions',
-            '/chat/conversations',
-            '/chat_session/list',
-            '/user/chats'
-        ];
-
-        for (const endpoint of listEndpoints) {
-            try {
-                const response = await fetch(`${DeepSeekAdapter.apiBase}${endpoint}`, {
+        // VERIFIED ENDPOINT: /api/v0/chat_session/fetch_page (discovered 2026-01-10)
+        try {
+            const response = await fetch(
+                `${DeepSeekAdapter.apiBase}/chat_session/fetch_page?lte_cursor.pinned=false`,
+                {
                     credentials: 'include',
                     headers: { 'Accept': 'application/json' }
+                }
+            );
+
+            if (response.ok) {
+                const data = await response.json();
+                // Response format: { data: { biz_data: { chat_sessions: [...], pinned: {...} } } }
+                const sessions = data.data?.biz_data?.chat_sessions ||
+                    data.data?.chat_sessions ||
+                    data.biz_data?.chat_sessions ||
+                    data.chat_sessions || [];
+
+                sessions.slice(0, limit).forEach(chat => {
+                    threads.push({
+                        uuid: chat.id || chat.chat_session_id || chat.session_id,
+                        title: chat.title || chat.name || 'DeepSeek Chat',
+                        platform: 'DeepSeek',
+                        last_query_datetime: chat.updated_at || chat.create_time || new Date().toISOString()
+                    });
                 });
 
-                if (response.ok) {
-                    const data = await response.json();
-                    // Try to extract chat list from various response formats
-                    const chats = data.data?.list || data.data?.chats || data.chats || data.list || data.sessions || [];
-
-                    if (Array.isArray(chats) && chats.length > 0) {
-                        chats.slice(0, limit).forEach(chat => {
-                            threads.push({
-                                uuid: chat.id || chat.chat_session_id || chat.session_id || chat.uuid,
-                                title: chat.title || chat.name || 'DeepSeek Chat',
-                                platform: 'DeepSeek',
-                                last_query_datetime: chat.updated_at || chat.create_time || new Date().toISOString()
-                            });
-                        });
-                        break;
-                    }
+                if (threads.length > 0) {
+                    return threads;
                 }
-            } catch (e) {
-                // Continue to next endpoint
             }
+        } catch (e) {
+            console.warn('[DeepSeekAdapter] API fetch failed, trying DOM fallback');
         }
 
-        // Fallback: return current chat
+        // DOM Fallback: Parse sidebar chat items
+        try {
+            const chatItems = document.querySelectorAll('a._546d736, a[href*="/chat/s/"], [class*="session-item"]');
+            chatItems.forEach((item, i) => {
+                if (i >= limit) return;
+                const href = item.getAttribute('href') || '';
+                const uuidMatch = href.match(/\/chat\/s\/([a-zA-Z0-9-]+)/) || href.match(/([a-f0-9-]{36})/i);
+                if (uuidMatch) {
+                    threads.push({
+                        uuid: uuidMatch[1],
+                        title: item.innerText?.trim()?.slice(0, 100) || 'DeepSeek Chat',
+                        platform: 'DeepSeek',
+                        last_query_datetime: new Date().toISOString()
+                    });
+                }
+            });
+        } catch (e) { }
+
+        // Final fallback: current chat
         if (threads.length === 0) {
             const currentUuid = DeepSeekAdapter.extractUuid(window.location.href);
             if (currentUuid) {
