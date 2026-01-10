@@ -1479,8 +1479,38 @@ async function loadAllThreads() {
     try {
         await reqDeduplication.run('loadAll', async () => {
             const listEl = document.getElementById('threadList');
-            LoadingManager.show('loadAllBtn', 'Loading...');
-            listEl.innerHTML = '<div class="loader-container"><div class="loader"></div><span>Loading all threads...</span></div>';
+            const loadBtn = document.getElementById('loadAllBtn');
+
+            // Get platform emoji for loading
+            const platformEmoji = currentPlatform === 'Perplexity' ? '🔮' :
+                currentPlatform === 'ChatGPT' ? '🤖' :
+                    currentPlatform === 'Claude' ? '🧠' :
+                        currentPlatform === 'Gemini' ? '✨' :
+                            currentPlatform === 'Grok' ? '❌' :
+                                currentPlatform === 'DeepSeek' ? '🔍' : '💬';
+
+            // Enhanced loading button state
+            if (loadBtn) {
+                loadBtn.innerHTML = `<span class="loading-spinner"></span> Loading...`;
+                loadBtn.disabled = true;
+                loadBtn.classList.add('loading');
+            }
+
+            // Show skeleton loading with platform branding
+            listEl.innerHTML = `
+                <div class="loading-state">
+                    <div class="platform-loading-header">
+                        <span class="platform-emoji">${platformEmoji}</span>
+                        <span class="platform-name">${currentPlatform || 'AI Platform'}</span>
+                    </div>
+                    <div class="loading-progress">
+                        <div class="progress-bar-animated"></div>
+                    </div>
+                    <div class="loading-text">Fetching threads...</div>
+                    <div class="skeleton-threads">
+                        ${Array(5).fill('<div class="skeleton-thread"><div class="skeleton-checkbox"></div><div class="skeleton-content"><div class="skeleton-title"></div><div class="skeleton-date"></div></div></div>').join('')}
+                    </div>
+                </div>`;
 
             threadData = [];
             let offset = 0;
@@ -1491,8 +1521,12 @@ async function loadAllThreads() {
 
             const tab = await getAITab();
             if (!tab) {
-                listEl.innerHTML = '<div class="loader">Open an AI platform first.</div>';
-                LoadingManager.hide('loadAllBtn');
+                listEl.innerHTML = '<div class="empty-state"><span class="empty-icon">🔌</span><span>Open an AI platform first</span></div>';
+                if (loadBtn) {
+                    loadBtn.innerHTML = 'Load All';
+                    loadBtn.disabled = false;
+                    loadBtn.classList.remove('loading');
+                }
                 return;
             }
 
@@ -1516,9 +1550,14 @@ async function loadAllThreads() {
                 if (result && result.success && result.data && result.data.threads && result.data.threads.length > 0) {
                     const newThreads = result.data.threads;
                     threadData = [...threadData, ...newThreads];
-                    listEl.innerHTML = `<div class="loader">Loaded ${threadData.length} threads...</div>`;
-                    offset += newThreads.length;
 
+                    // Update progress with count
+                    const loadingText = listEl.querySelector('.loading-text');
+                    if (loadingText) {
+                        loadingText.textContent = `${platformEmoji} Loaded ${threadData.length} threads...`;
+                    }
+
+                    offset += newThreads.length;
                     if (newThreads.length < batchSize) keepLoading = false;
                     await new Promise(r => setTimeout(r, delayMs));
                 } else {
@@ -1530,12 +1569,25 @@ async function loadAllThreads() {
             currentPage = 1;
             renderThreadList(threadData.slice(0, itemsPerPage));
             updatePagination();
-            LoadingManager.hide('loadAllBtn');
+
+            // Restore button
+            if (loadBtn) {
+                loadBtn.innerHTML = '✓ Loaded';
+                loadBtn.disabled = false;
+                loadBtn.classList.remove('loading');
+                setTimeout(() => { loadBtn.innerHTML = 'Load All'; }, 2000);
+            }
+
             log(`Loaded all ${threadData.length} threads!`, 'success');
         });
     } catch (e) {
         console.error("[OmniExporter] Error in loadAllThreads:", e);
-        LoadingManager.hide('loadAllBtn');
+        const loadBtn = document.getElementById('loadAllBtn');
+        if (loadBtn) {
+            loadBtn.innerHTML = 'Load All';
+            loadBtn.disabled = false;
+            loadBtn.classList.remove('loading');
+        }
         log('Failed to load all threads.', 'error');
     }
 }
