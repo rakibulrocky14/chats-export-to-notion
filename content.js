@@ -277,11 +277,29 @@ async function handleGetThreadList(adapter, payload, sendResponse) {
 
 /**
  * Handle Thread List Fetching with Direct Offset (for Load All feature)
+ * ENTERPRISE: Supports all 6 platforms with anti-bot measures
  */
 async function handleGetThreadListOffset(adapter, payload, sendResponse) {
     try {
         const offset = payload.offset || 0;
         const limit = payload.limit || 50;
+
+        // ANTI-BOT: Add random delay between requests (200-800ms)
+        if (offset > 0) {
+            const delay = 200 + Math.random() * 600;
+            await new Promise(r => setTimeout(r, delay));
+        }
+
+        // Common headers to appear more like a real browser
+        const browserHeaders = {
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin'
+        };
 
         // Use Perplexity API directly with offset
         if (adapter.name === 'Perplexity') {
@@ -291,7 +309,10 @@ async function handleGetThreadListOffset(adapter, payload, sendResponse) {
             const response = await fetch(url, {
                 method: "POST",
                 credentials: "include",
-                headers: { "accept": "*/*", "content-type": "application/json" },
+                headers: {
+                    ...browserHeaders,
+                    "content-type": "application/json"
+                },
                 body: JSON.stringify(body)
             });
             const data = await response.json();
@@ -317,42 +338,115 @@ async function handleGetThreadListOffset(adapter, payload, sendResponse) {
                 }
             });
         }
-        // ENTERPRISE: ChatGPT with native offset support
+        // ENTERPRISE: ChatGPT with native offset support + anti-bot headers
         else if (adapter.name === 'ChatGPT') {
-            const baseUrl = 'https://chatgpt.com/backend-api';
-            const url = `${baseUrl}/conversations?offset=${offset}&limit=${limit}&order=updated`;
+            try {
+                const baseUrl = 'https://chatgpt.com/backend-api';
+                const url = `${baseUrl}/conversations?offset=${offset}&limit=${limit}&order=updated`;
 
-            const response = await fetch(url, { credentials: 'include' });
-            if (response.ok) {
-                const data = await response.json();
-                const threads = (data.items || []).map(t => ({
-                    uuid: t.id,
-                    title: t.title || 'ChatGPT Chat',
-                    last_query_datetime: t.update_time
-                }));
-                sendResponse({
-                    success: true,
-                    data: { threads, offset, hasMore: threads.length === limit, total: data.total }
+                const response = await fetch(url, {
+                    credentials: 'include',
+                    headers: {
+                        ...browserHeaders,
+                        'Content-Type': 'application/json',
+                        'OAI-Device-Id': localStorage.getItem('oai-device-id') || '',
+                        'OAI-Language': 'en-US'
+                    }
                 });
-            } else {
-                // Fallback to page-based
-                const page = Math.floor(offset / limit) + 1;
-                const result = await adapter.getThreads(page, limit);
-                sendResponse({ success: true, data: result });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const threads = (data.items || []).map(t => ({
+                        uuid: t.id,
+                        title: t.title || 'ChatGPT Chat',
+                        last_query_datetime: t.update_time
+                    }));
+                    sendResponse({
+                        success: true,
+                        data: { threads, offset, hasMore: threads.length === limit, total: data.total }
+                    });
+                } else if (response.status === 403 || response.status === 429) {
+                    // Bot detection likely - use DOM fallback
+                    console.warn('[ChatGPT] API blocked (403/429), using DOM fallback');
+                    const result = await adapter.getThreads(1, limit);
+                    sendResponse({ success: true, data: { threads: result.threads || result, offset: 0, hasMore: false } });
+                } else {
+                    // Other error - try page-based fallback
+                    const page = Math.floor(offset / limit) + 1;
+                    const result = await adapter.getThreads(page, limit);
+                    sendResponse({ success: true, data: result });
+                }
+            } catch (e) {
+                console.error('[ChatGPT] Error:', e.message);
+                sendResponse({ success: false, error: e.message });
             }
         }
         // ENTERPRISE: Gemini with API support
         else if (adapter.name === 'Gemini') {
-            const page = Math.floor(offset / limit) + 1;
-            const result = await adapter.getThreads(page, limit);
-            sendResponse({
-                success: true,
-                data: {
-                    threads: result.threads || result,
-                    offset,
-                    hasMore: result.hasMore || false
+            try {
+                const page = Math.floor(offset / limit) + 1;
+                const result = await adapter.getThreads(page, limit);
+                const threads = result.threads || result || [];
+                sendResponse({
+                    success: true,
+                    data: {
+                        threads: Array.isArray(threads) ? threads : [],
+                        offset,
+                        hasMore: result.hasMore || false
+                    }
+                });
+            } catch (e) {
+                console.warn('[Gemini] API failed, trying DOM fallback:', e.message);
+                // DOM fallback - parse sidebar
+                const threads = [];
+                document.querySelectorAll('[class*="conversation-title"], [class*="chat-item"], a[href*="/app/"]').forEach((item, i) => {
+                    if (i >= limit) return;
+                    const href = item.closest('a')?.getAttribute('href') || '';
+                    const uuid = href.match(/\/app\/([a-zA-Z0-9_-]+)/)?.[1];
+                    if (uuid) {
+                        threads.push({
+                            uuid,
+                            title: item.textContent?.trim() || 'Gemini Chat',
+                            platform: 'Gemini'
+                        });
+                    }
+                });
+                sendResponse({ success: true, data: { threads, offset: 0, hasMore: false } });
+            }
+        }
+        // ENTERPRISE: Grok support (NEW)
+        else if (adapter.name === 'Grok') {
+            try {
+                const response = await fetch('https://grok.com/rest/app-chat/conversations', {
+                    credentials: 'include',
+                    headers: {
+                        ...browserHeaders,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const chats = data.conversations || data.data || data.items || [];
+                    const threads = chats.slice(offset, offset + limit).map(t => ({
+                        uuid: t.id || t.conversationId || t.uuid,
+                        title: t.title || t.name || 'Grok Chat',
+                        last_query_datetime: t.updatedAt || t.createdAt
+                    }));
+                    sendResponse({
+                        success: true,
+                        data: { threads, offset, hasMore: offset + limit < chats.length, total: chats.length }
+                    });
+                } else {
+                    // DOM fallback
+                    const result = await adapter.getThreads(1, limit);
+                    sendResponse({ success: true, data: { threads: result, offset: 0, hasMore: false } });
                 }
-            });
+            } catch (e) {
+                console.warn('[Grok] API failed:', e.message);
+                const result = await adapter.getThreads(1, limit);
+                sendResponse({ success: true, data: { threads: result, offset: 0, hasMore: false } });
+            }
         }
         // ENTERPRISE: Use getAllThreads if adapter supports it (for complete Load All)
         else if (payload.loadAll && adapter.getAllThreads) {
@@ -374,9 +468,11 @@ async function handleGetThreadListOffset(adapter, payload, sendResponse) {
             sendResponse({ success: true, data: response });
         }
     } catch (error) {
+        console.error('[handleGetThreadListOffset] Error:', error);
         sendResponse({ success: false, error: error.message });
     }
 }
+
 
 
 async function handleGetSpaces(adapter, sendResponse) {
