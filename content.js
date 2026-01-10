@@ -303,7 +303,34 @@ async function handleGetThreadListOffset(adapter, payload, sendResponse) {
             }));
 
             sendResponse({ success: true, data: { threads, offset, hasMore: threads.length === limit } });
-        } else {
+        }
+        // ENTERPRISE: DeepSeek with cursor-based offset simulation
+        else if (adapter.name === 'DeepSeek' && adapter.getThreadsWithOffset) {
+            const result = await adapter.getThreadsWithOffset(offset, limit);
+            sendResponse({
+                success: true,
+                data: {
+                    threads: result.threads,
+                    offset: result.offset,
+                    hasMore: result.hasMore,
+                    total: result.total
+                }
+            });
+        }
+        // ENTERPRISE: Use getAllThreads if adapter supports it (for complete Load All)
+        else if (payload.loadAll && adapter.getAllThreads) {
+            const threads = await adapter.getAllThreads();
+            sendResponse({
+                success: true,
+                data: {
+                    threads,
+                    offset: 0,
+                    hasMore: false,
+                    total: threads.length
+                }
+            });
+        }
+        else {
             // Fallback to page-based for other platforms
             const page = Math.floor(offset / limit) + 1;
             const response = await adapter.getThreads(page, limit);
