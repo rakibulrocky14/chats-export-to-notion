@@ -92,7 +92,16 @@
             "run_at": "document_idle"
         }
     ],
-    "web_accessible_resources": [],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "gemini-page-interceptor.js"
+            ],
+            "matches": [
+                "https://gemini.google.com/*"
+            ]
+        }
+    ],
     "icons": {
         "128": "icons/icon128.png"
     }

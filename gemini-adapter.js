@@ -2,152 +2,133 @@
 // Support for Google Gemini (gemini.google.com)
 // VERIFIED API: batchexecute with rpcids MaZiqc (list) and hNvQHb (messages)
 // Discovered via Chrome DevTools MCP 2026-01-10
-// FEATURE: XHR interceptor to increase message limit from 20 to 100
+// FIXED: XHR interceptor now runs in PAGE context (not content script)
 
 // =============================================
-// XHR INTERCEPTOR - Increase message fetch limit
-// From Reference: faltu5.txt
+// PAGE CONTEXT SCRIPT INJECTOR
+// Content scripts run in isolated world - they CAN'T intercept page XHRs
+// Solution: Inject script into page context via web_accessible_resources
 // =============================================
-class GeminiXHRInterceptor {
-    constructor() {
-        this.originalXHROpen = null;
-        this.originalXHRSend = null;
-        this.isHooked = false;
-        this.targetUrl = "/_/BardChatUi/data/batchexecute";
-        this.targetAction = "hNvQHb";
-    }
 
-    start() {
-        if (this.isHooked) return;
-        this.hookXHR();
-        this.isHooked = true;
-        console.log('[GeminiAdapter] XHR interceptor started - message limit increased to 100');
-    }
+(function injectPageInterceptor() {
+    // Only run on Gemini pages
+    if (!window.location.hostname.includes('gemini.google.com')) return;
 
-    stop() {
-        if (!this.isHooked) return;
-        this.unhookXHR();
-        this.isHooked = false;
-    }
+    // Prevent duplicate injection
+    if (document.getElementById('omni-gemini-interceptor')) return;
 
-    isGeminiAPIRequest(url) {
-        return url && url.includes(this.targetUrl);
-    }
-
-    hasTargetRpcids(url, targetRpcid) {
-        try {
-            const urlObj = new URL(url, window.location.origin);
-            return urlObj.searchParams.get("rpcids") === targetRpcid;
-        } catch {
-            return false;
-        }
-    }
-
-    // Modify the f.req field to change message limit from 20 to 100
-    modifyFreqField(freqStr) {
-        try {
-            const parsed = JSON.parse(freqStr);
-            let modified = false;
-
-            const result = this.traverseAndModify(parsed, (item) => {
-                // Look for hNvQHb action with message limit
-                if (Array.isArray(item) && item.length >= 2 &&
-                    item[0] === this.targetAction && typeof item[1] === "string") {
-                    try {
-                        const innerPayload = JSON.parse(item[1]);
-                        // innerPayload[1] is the message limit (usually 20)
-                        if (Array.isArray(innerPayload) && innerPayload.length > 1 &&
-                            typeof innerPayload[1] === "number" && innerPayload[1] <= 20) {
-                            innerPayload[1] = 100; // Increase to 100
-                            item[1] = JSON.stringify(innerPayload);
-                            modified = true;
-                            console.log('[GeminiAdapter] Increased message limit to 100');
-                        }
-                    } catch { }
-                }
-                return item;
-            });
-
-            return modified ? JSON.stringify(result) : freqStr;
-        } catch {
-            return freqStr;
-        }
-    }
-
-    traverseAndModify(obj, callback) {
-        if (Array.isArray(obj)) {
-            return obj.map(item => {
-                const modified = callback(item);
-                return this.traverseAndModify(modified, callback);
-            });
-        } else if (typeof obj === "object" && obj !== null) {
-            const result = {};
-            for (const [key, value] of Object.entries(obj)) {
-                result[key] = this.traverseAndModify(value, callback);
-            }
-            return result;
-        }
-        return obj;
-    }
-
-    modifyRequestBody(body) {
-        if (!body || typeof body !== "string" || !body.includes("f.req=")) {
-            return body;
-        }
-
-        try {
-            const params = new URLSearchParams(body);
-            const freqValue = params.get("f.req");
-            if (freqValue) {
-                const modified = this.modifyFreqField(freqValue);
-                params.set("f.req", modified);
-                return params.toString();
-            }
-        } catch (e) {
-            console.error('[GeminiAdapter] Error modifying request:', e);
-        }
-        return body;
-    }
-
-    hookXHR() {
-        this.originalXHROpen = XMLHttpRequest.prototype.open;
-        this.originalXHRSend = XMLHttpRequest.prototype.send;
-        const interceptor = this;
-
-        XMLHttpRequest.prototype.open = function (method, url, async, user, password) {
-            this._interceptor_url = url;
-            return interceptor.originalXHROpen.call(this, method, url, async !== false, user || null, password || null);
+    try {
+        const script = document.createElement('script');
+        script.id = 'omni-gemini-interceptor';
+        script.src = chrome.runtime.getURL('gemini-page-interceptor.js');
+        script.onload = function () {
+            console.log('[GeminiAdapter] Page interceptor injected successfully');
+            this.remove(); // Clean up script tag after execution
         };
-
-        XMLHttpRequest.prototype.send = function (body) {
-            const url = this._interceptor_url;
-            if (url && interceptor.isGeminiAPIRequest(url) &&
-                interceptor.hasTargetRpcids(url, interceptor.targetAction)) {
-                const modifiedBody = interceptor.modifyRequestBody(body);
-                if (modifiedBody !== body) {
-                    return interceptor.originalXHRSend.call(this, modifiedBody);
-                }
-            }
-            return interceptor.originalXHRSend.call(this, body);
+        script.onerror = function () {
+            console.warn('[GeminiAdapter] Failed to inject page interceptor');
         };
+        (document.head || document.documentElement).appendChild(script);
+    } catch (e) {
+        console.warn('[GeminiAdapter] Injection error:', e.message);
     }
+})();
 
-    unhookXHR() {
-        if (this.originalXHROpen) {
-            XMLHttpRequest.prototype.open = this.originalXHROpen;
+// =============================================
+// MESSAGE BRIDGE - Connect to gemini-inject.js
+// Listens for messages from page context scripts
+// =============================================
+const GeminiBridge = {
+    pendingRequests: new Map(),
+    isReady: false,
+    interceptorReady: false,
+
+    init() {
+        window.addEventListener('message', (event) => {
+            if (event.source !== window) return;
+            if (!event.data || event.data.type !== 'OMNIEXPORTER_GEMINI') return;
+            if (event.data.direction !== 'to-content') return;
+
+            this.handleMessage(event.data);
+        });
+        console.log('[GeminiAdapter] Message bridge initialized');
+    },
+
+    handleMessage(message) {
+        const { action, requestId, success, data, error } = message;
+
+        switch (action) {
+            case 'INJECT_READY':
+                this.isReady = true;
+                console.log('[GeminiAdapter] gemini-inject.js is ready');
+                break;
+            case 'INTERCEPTOR_READY':
+                this.interceptorReady = true;
+                console.log('[GeminiAdapter] Page interceptor ready - limit:', data?.limit);
+                break;
+            case 'RESPONSE':
+                const pending = this.pendingRequests.get(requestId);
+                if (pending) {
+                    this.pendingRequests.delete(requestId);
+                    if (success) {
+                        pending.resolve(data);
+                    } else {
+                        pending.reject(new Error(error || 'Unknown error'));
+                    }
+                }
+                break;
         }
-        if (this.originalXHRSend) {
-            XMLHttpRequest.prototype.send = this.originalXHRSend;
+    },
+
+    // Send request to page context (gemini-inject.js)
+    sendRequest(action, data = {}) {
+        return new Promise((resolve, reject) => {
+            const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+            this.pendingRequests.set(requestId, { resolve, reject });
+
+            // Timeout after 10 seconds
+            setTimeout(() => {
+                if (this.pendingRequests.has(requestId)) {
+                    this.pendingRequests.delete(requestId);
+                    reject(new Error('Request timeout'));
+                }
+            }, 10000);
+
+            window.postMessage({
+                type: 'OMNIEXPORTER_GEMINI',
+                direction: 'to-page',
+                requestId,
+                action,
+                data
+            }, '*');
+        });
+    },
+
+    // Get auth token from page context
+    async getAuthToken() {
+        if (!this.isReady) return null;
+        try {
+            const result = await this.sendRequest('GET_AUTH_TOKEN');
+            return result?.token || result?.SNlM0e || null;
+        } catch {
+            return null;
+        }
+    },
+
+    // Get global data from page context  
+    async getGlobalData() {
+        if (!this.isReady) return null;
+        try {
+            return await this.sendRequest('GET_GLOBAL_DATA');
+        } catch {
+            return null;
         }
     }
-}
+};
 
-// Initialize interceptor on Gemini pages
-const geminiInterceptor = new GeminiXHRInterceptor();
-if (window.location.hostname.includes('gemini.google.com')) {
-    geminiInterceptor.start();
-    window.addEventListener('beforeunload', () => geminiInterceptor.stop());
-}
+// Initialize bridge
+GeminiBridge.init();
 
 const GeminiAdapter = {
     name: "Gemini",

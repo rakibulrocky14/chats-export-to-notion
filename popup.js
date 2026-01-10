@@ -240,6 +240,7 @@ const reqDeduplication = new RequestDeduplicator();
 // INITIALIZATION
 // ============================================
 document.addEventListener('DOMContentLoaded', () => {
+    initConnectionDots(); // Initialize connection dots first
     detectPlatform();
     loadSyncStatus();
     initExportDropdown();
@@ -261,6 +262,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     if (!navigator.onLine) setStatus('🔌 Offline', 'error');
 });
+
+// ============================================
+// CONNECTION DOTS INITIALIZATION
+// ============================================
+function initConnectionDots() {
+    const platforms = ['perplexity', 'chatgpt', 'claude', 'gemini', 'grok', 'deepseek'];
+    platforms.forEach(platform => {
+        const dot = document.getElementById(`dot-${platform}`);
+        if (dot) {
+            dot.classList.add('checking'); // Show checking animation initially
+        }
+    });
+}
 
 // ============================================
 // EXPORT DROPDOWN
