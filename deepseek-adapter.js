@@ -270,43 +270,58 @@ const DeepSeekAdapter = {
     },
 
     // ============================================
-    // Thread Detail (unchanged - already works)
+    // Thread Detail - FIXED: Correct response parsing
+    // Messages are in data.biz_data.chat_messages
+    // Role is 'USER' or 'ASSISTANT' (uppercase)
     // ============================================
     getThreadDetail: async (uuid) => {
         try {
+            console.log(`[DeepSeekAdapter] Fetching thread detail for UUID: ${uuid}`);
+
             const response = await DeepSeekAdapter._fetchWithRetry(
                 `${DeepSeekAdapter.apiBase}/chat/history_messages?chat_session_id=${uuid}`
             );
 
             const data = await response.json();
-            const messages = data.data?.messages || data.messages || data.data || [];
+
+            // FIXED: Correct path is data.biz_data.chat_messages
+            const bizData = data.data?.biz_data || data.biz_data || {};
+            const messages = bizData.chat_messages || bizData.messages || data.data?.messages || [];
+
+            console.log(`[DeepSeekAdapter] Found ${messages.length} messages for UUID: ${uuid}`);
 
             if (Array.isArray(messages) && messages.length > 0) {
                 const entries = [];
                 let currentQuery = '';
 
                 messages.forEach(msg => {
-                    const role = msg.role || msg.author || msg.type;
+                    // FIXED: Role is uppercase 'USER' / 'ASSISTANT'
+                    const role = (msg.role || msg.author || msg.type || '').toUpperCase();
                     const content = msg.content || msg.text || msg.message || '';
 
-                    if (role === 'user' || role === 'human') {
+                    if (role === 'USER' || role === 'HUMAN') {
                         currentQuery = content;
-                    } else if ((role === 'assistant' || role === 'bot' || role === 'deepseek') && currentQuery) {
+                    } else if ((role === 'ASSISTANT' || role === 'BOT' || role === 'DEEPSEEK') && currentQuery) {
                         entries.push({ query: currentQuery, answer: content });
                         currentQuery = '';
                     }
                 });
 
-                const title = data.data?.title || data.title ||
-                    document.title?.replace(' - DeepSeek', '').trim() ||
-                    'DeepSeek Conversation';
+                // Get title from session info or fallback
+                const title = bizData.chat_session?.title ||
+                    data.data?.title ||
+                    data.title ||
+                    `DeepSeek Thread ${uuid.slice(0, 8)}`;
 
+                console.log(`[DeepSeekAdapter] Extracted ${entries.length} Q&A pairs for: ${title}`);
                 return { uuid, title, platform: 'DeepSeek', entries };
             }
         } catch (e) {
-            console.warn('[DeepSeekAdapter] API failed, using DOM fallback');
+            console.warn('[DeepSeekAdapter] API failed:', e.message);
         }
 
+        // DOM fallback only works for current page - log warning
+        console.warn(`[DeepSeekAdapter] Falling back to DOM extraction (only works for current page)`);
         return DeepSeekAdapter.extractFromDOM(uuid);
     },
 
