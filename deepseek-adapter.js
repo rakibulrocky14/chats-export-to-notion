@@ -30,15 +30,47 @@ const DeepSeekAdapter = {
     },
 
     // ============================================
-    // ENTERPRISE: Retry with exponential backoff
+    // ENTERPRISE: Get auth token from localStorage
+    // DeepSeek stores token as JSON: {value: "...", ...}
+    // ============================================
+    _getAuthToken: () => {
+        try {
+            const tokenData = localStorage.getItem('userToken');
+            if (!tokenData) return null;
+
+            // Try parsing as JSON (DeepSeek stores {value: "token", ...})
+            try {
+                const parsed = JSON.parse(tokenData);
+                return parsed.value || parsed.token || tokenData;
+            } catch {
+                return tokenData; // Plain string token
+            }
+        } catch {
+            return null;
+        }
+    },
+
+    // ============================================
+    // ENTERPRISE: Retry with exponential backoff + Auth
     // ============================================
     _fetchWithRetry: async (url, options = {}, maxRetries = 3) => {
         let lastError;
+
+        // Get auth token
+        const token = DeepSeekAdapter._getAuthToken();
+        const headers = {
+            'Accept': 'application/json',
+            ...options.headers
+        };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
                 const response = await fetch(url, {
                     credentials: 'include',
-                    headers: { 'Accept': 'application/json' },
+                    headers,
                     ...options
                 });
                 if (response.ok) return response;
