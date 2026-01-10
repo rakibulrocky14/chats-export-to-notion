@@ -787,17 +787,35 @@ async function updatePlatformSelector() {
 }
 
 async function getAITab() {
+    // CRITICAL FIX: Always return a tab matching the current platform
+    // This prevents exporting Grok threads from a Perplexity tab
+
+    const tabs = await findAllAIPlatformTabs();
+
+    // If we have a currentPlatform, find a tab for that specific platform
+    if (currentPlatform) {
+        const platformTab = tabs.find(t => t.platformName === currentPlatform);
+        if (platformTab) {
+            aiPlatformTabId = platformTab.id;
+            console.log(`[getAITab] Using ${currentPlatform} tab:`, platformTab.id);
+            return platformTab;
+        }
+    }
+
     // Return cached tab if valid and still exists
     if (aiPlatformTabId) {
         try {
             const tab = await chrome.tabs.get(aiPlatformTabId);
-            if (tab) return tab;
+            // Verify this tab is still in our AI tabs list
+            if (tab && tabs.find(t => t.id === tab.id)) {
+                return tabs.find(t => t.id === tab.id);
+            }
         } catch (e) {
             aiPlatformTabId = null;
         }
     }
+
     // Otherwise find first available
-    const tabs = await findAllAIPlatformTabs();
     if (tabs.length > 0) {
         aiPlatformTabId = tabs[0].id;
         return tabs[0];
