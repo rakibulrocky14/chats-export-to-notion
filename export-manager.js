@@ -67,7 +67,7 @@ class ExportManager {
     }
 
     // ============================================
-    // MARKDOWN FORMAT
+    // MARKDOWN FORMAT (WITH PLATFORM LOGOS)
     // ============================================
     static toMarkdown(data, platform) {
         const entries = data.detail?.entries || [];
@@ -77,6 +77,17 @@ class ExportManager {
             ? new Date(firstEntry.updated_datetime).toISOString().split('T')[0]
             : new Date().toISOString().split('T')[0];
 
+        // Platform emoji icons
+        const platformIcons = {
+            'Perplexity': '🧭',
+            'ChatGPT': '🤖',
+            'Claude': '🎯',
+            'Gemini': '✨',
+            'Grok': '𝕏',
+            'DeepSeek': '🔮'
+        };
+        const platformIcon = platformIcons[platform] || '💬';
+
         let md = '---\n';
         md += `title: "${title}"\n`;
         md += `date: ${date}\n`;
@@ -84,7 +95,8 @@ class ExportManager {
         md += `uuid: ${data.uuid || 'unknown'}\n`;
         md += `entries: ${entries.length}\n`;
         md += '---\n\n';
-        md += `# ${title}\n\n`;
+        md += `# ${platformIcon} ${title}\n\n`;
+        md += `> **Platform:** ${platform} | **Conversations:** ${entries.length} | **Date:** ${date}\n\n`;
 
         entries.forEach((entry, index) => {
             const query = entry.query || entry.query_str || '';
@@ -149,11 +161,22 @@ class ExportManager {
     }
 
     // ============================================
-    // HTML FORMAT
+    // HTML FORMAT (WITH PLATFORM LOGOS)
     // ============================================
     static toHTML(data, platform) {
         const entries = data.detail?.entries || [];
         const title = data.title || 'Untitled Chat';
+        
+        // Platform emoji icons
+        const platformIcons = {
+            'Perplexity': '🧭',
+            'ChatGPT': '🤖',
+            'Claude': '🎯',
+            'Gemini': '✨',
+            'Grok': '𝕏',
+            'DeepSeek': '🔮'
+        };
+        const platformIcon = platformIcons[platform] || '💬';
 
         let html = `<!DOCTYPE html>
 <html lang="en">
@@ -182,6 +205,15 @@ class ExportManager {
             color: white;
             padding: 30px;
             text-align: center;
+        }
+        .platform-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            margin-bottom: 12px;
+            font-weight: 600;
         }
         .header h1 {
             font-size: 24px;
@@ -261,9 +293,17 @@ class ExportManager {
 <body>
     <div class="container">
         <div class="header">
+            <div class="platform-badge">${platformIcon} ${platform}</div>
             <h1>${this.escapeHtml(title)}</h1>
-            <div class="meta">Platform: ${platform} • ${entries.length} exchanges</div>
+            <div class="meta">${entries.length} exchanges • Exported with OmniExporter AI</div>
         </div>
+        <div class="content">`;
+
+        entries.forEach((entry, index) => {
+            const query = entry.query || entry.query_str || '';
+            const answer = this.extractAnswer(entry);
+
+        html += `
         <div class="content">`;
 
         entries.forEach((entry, index) => {
@@ -277,7 +317,7 @@ class ExportManager {
                     ${this.escapeHtml(query)}
                 </div>
                 <div class="answer">
-                    <div class="answer-label">🤖 Answer</div>
+                    <div class="answer-label">${platformIcon} Answer</div>
                     ${this.escapeHtml(answer).replace(/\n/g, '<br>')}
                 </div>`;
 

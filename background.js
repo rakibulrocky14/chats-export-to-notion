@@ -87,6 +87,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         }
 
         // Clear alarm when Notion credentials removed
+        if (changes.notionApiKey && !changes.notionApiKey.newValue) {
+            chrome.alarms.clear('autoSyncAlarm');
+            console.log('[Alarm] Alarm cleared - Notion key removed');
+        }
         if (changes.notionKey && !changes.notionKey.newValue) {
             chrome.alarms.clear('autoSyncAlarm');
             console.log('[Alarm] Alarm cleared - Notion key removed');
@@ -97,6 +101,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 // ============================================
 // AUTO-SYNC IMPLEMENTATION (Incremental with Checkpoints)
 // ============================================
+
+// Load OAuth module in service worker context
+if (typeof importScripts === 'function') {
+    importScripts('auth/notion-oauth.js');
+}
+
 
 /**
  * Get sync checkpoint for a platform
@@ -146,10 +156,11 @@ async function performAutoSync() {
 
     try {
         const settings = await chrome.storage.local.get([
-            'autoSyncEnabled', 'autoSyncNotion', 'notionKey', 'notionDbId', 'exportedUuids'
+            'autoSyncEnabled', 'autoSyncNotion', 'notionApiKey', 'notionKey', 'notionDbId', 'exportedUuids', 'notion_auth_method'
         ]);
 
-        if (!settings.autoSyncEnabled || !settings.notionKey || !settings.notionDbId) {
+        const notionKey = settings.notionApiKey || settings.notionKey;
+        if (!settings.autoSyncEnabled || !notionKey || !settings.notionDbId) {
             console.log("[AutoSync] Skipped: Not configured or disabled");
             await releaseSyncLock();
             return;
@@ -280,21 +291,79 @@ async function performAutoSync() {
 
 async function syncToNotion(data, settings) {
     try {
-        // Build content blocks from conversation entries
         const entries = data.detail?.entries || [];
         const children = [];
+        const token = await NotionOAuth.getActiveToken();
 
-        // Add metadata header
         children.push({
             type: "callout",
             callout: {
                 icon: { emoji: "🤖" },
                 color: "blue_background",
-                rich_text: [{
-                    type: "text",
-                    text: { content: `Auto-synced on ${new Date().toLocaleString()}` }
-                }]
+                rich_text: [{ type: "text", text: { content: `Auto-synced from ${data.platform || 'AI'} at ${new Date().toLocaleString()}` } }]
             }
+        });
+        children.push({ type: "divider", divider: {} });
+
+        entries.slice(0, 5).forEach((entry) => {
+            const query = entry.query || entry.query_str || '';
+            if (query) {
+                children.push({
+                    type: "heading_2",
+                    heading_2: {
+                        rich_text: [{ type: "text", text: { content: query.slice(0, 2000) } }]
+                    }
+                });
+            }
+
+            // Extract answer from blocks or direct properties
+            let answer = '';
+            if (entry.blocks && Array.isArray(entry.blocks)) {
+                entry.blocks.forEach(block => {
+                    if (block.intended_usage === 'ask_text' && block.markdown_block) {
+                        answer += (block.markdown_block.answer || block.markdown_block.chunks?.join('\n') || '') + '\n\n';
+                    }
+                });
+            }
+            if (!answer.trim()) answer = entry.answer || entry.text || '';
+
+            if (answer.trim()) {
+                children.push({
+                    type: "paragraph",
+                    paragraph: {
+                        rich_text: [{ type: "text", text: { content: answer.slice(0, 1900) } }]
+                    }
+                });
+            }
+        });
+
+        const token = await NotionOAuth.getActiveToken();
+        const response = await fetch('https://api.notion.com/v1/pages', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Notion-Version': '2022-06-28'
+            },
+            body: JSON.stringify({
+                parent: { database_id: settings.notionDbId },
+                properties: {
+                    title: { title: [{ type: "text", text: { content: data.title || "Untitled" } }] }
+                },
+                children: children.slice(0, 100) // Notion limit
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            return { success: false, error: err.message || 'API Error' };
+        }
+
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+}
         });
 
         // Add Q&A entries (limit to first 5 to avoid timeouts)
@@ -333,7 +402,7 @@ async function syncToNotion(data, settings) {
         const response = await fetch('https://api.notion.com/v1/pages', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${settings.notionKey}`,
+                'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json',
                 'Notion-Version': '2022-06-28'
             },

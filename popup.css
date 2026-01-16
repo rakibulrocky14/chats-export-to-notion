@@ -477,15 +477,22 @@ footer .enterprise {
     box-shadow: 0 0 15px rgba(99, 102, 241, 0.4), inset 0 0 10px rgba(99, 102, 241, 0.1);
 }
 
-.nav-btn svg {
+.nav-btn svg,
+.nav-btn img {
     width: 18px;
     height: 18px;
     transition: transform 0.2s ease;
 }
 
-.nav-btn:hover svg {
+.nav-btn:hover svg,
+.nav-btn:hover img {
     transform: scale(1.15);
 }
+
+.nav-logo {
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.3));
+}
+
 
 /* Platform connection dots */
 .nav-btn {

@@ -234,41 +234,54 @@ const GeminiAdapter = {
 
     // ============================================
     // ENTERPRISE: Make batchexecute API call
+    // FIXED: Better error handling and response parsing
     // ============================================
     _batchExecute: async (rpcid, payload) => {
         const body = GeminiAdapter._buildBatchRequest(rpcid, payload);
 
-        const response = await fetch(`${GeminiAdapter.apiBase}?rpcids=${rpcid}&source-path=/app&bl=boq_assistant-bard-web-server`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-                'Accept': '*/*'
-            },
-            body
-        });
-
-        if (!response.ok) {
-            throw new Error(`Gemini API error: ${response.status}`);
-        }
-
-        const text = await response.text();
-        // Parse Google's weird response format (starts with ")]}'")
-        const cleaned = text.replace(/^\)\]\}'/, '').trim();
-
         try {
-            // Find the JSON array in the response
+            const response = await fetch(`${GeminiAdapter.apiBase}?rpcids=${rpcid}&source-path=/app&bl=boq_assistant-bard-web-server`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                    'Accept': '*/*',
+                    'User-Agent': navigator.userAgent
+                },
+                body
+            });
+
+            if (!response.ok) {
+                console.error(`[Gemini] API error: ${response.status} ${response.statusText}`);
+                throw new Error(`Gemini API error: ${response.status}`);
+            }
+
+            const text = await response.text();
+            console.log(`[Gemini] Raw response length: ${text.length} chars`);
+            
+            // Parse Google's weird response format (starts with ")]}'")
+            const cleaned = text.replace(/^\)\]\}'/, '').trim();
+
+            // Find and parse the JSON array in the response
             const lines = cleaned.split('\n');
             for (const line of lines) {
                 if (line.startsWith('[')) {
-                    return JSON.parse(line);
+                    try {
+                        const parsed = JSON.parse(line);
+                        console.log('[Gemini] ✓ Successfully parsed batchexecute response');
+                        return parsed;
+                    } catch (e) {
+                        console.warn('[Gemini] Failed to parse line:', line.substring(0, 100));
+                    }
                 }
             }
-        } catch (e) {
-            console.warn('[GeminiAdapter] Failed to parse batchexecute response');
-        }
 
-        return null;
+            console.warn('[Gemini] No valid JSON found in response');
+            return null;
+        } catch (error) {
+            console.error('[Gemini] _batchExecute failed:', error.message);
+            throw error;
+        }
     },
 
     // ============================================
@@ -370,103 +383,121 @@ const GeminiAdapter = {
 
     // ============================================
     // ENTERPRISE: Get thread detail via API
+    // FIXED: Better response parsing with multiple strategies
     // ============================================
     getThreadDetail: async function (uuid) {
         console.log(`[GeminiAdapter] Fetching thread detail for: ${uuid}`);
 
         // Try API first: rpcid hNvQHb for message history
-        try {
-            // Payload: [uuid, 10, null, 1, [0], [4], null, 1]
-            const payload = [uuid, 50, null, 1, [0], [4], null, 1];
-            const response = await GeminiAdapter._batchExecute('hNvQHb', payload);
+        // Try multiple RPC IDs as Google may update them
+        const rpcIds = ['hNvQHb', 'WqGlee', 'Mklfhc']; // Common Gemini RPC IDs
+        
+        for (const rpcId of rpcIds) {
+            try {
+                console.log(`[Gemini] Trying RPC ID: ${rpcId}`);
+                // Payload variations
+                const payloads = [
+                    [uuid, 50, null, 1, [0], [4], null, 1],  // Standard format
+                    [uuid, 100],                              // Simple format
+                    [uuid]                                     // Minimal format
+                ];
 
-            if (response) {
-                const dataStr = response[0]?.[2];
-                if (dataStr) {
-                    const data = JSON.parse(dataStr);
-                    const entries = [];
+                for (const payload of payloads) {
+                    try {
+                        const response = await GeminiAdapter._batchExecute(rpcId, payload);
 
-                    // Parse message turns from the nested structure
-                    // Typically the messages are in data[0] or similar
-                    const turns = data[0] || data[1] || [];
+                        if (!response || !response[0]) continue;
 
-                    if (Array.isArray(turns)) {
-                        let currentQuery = '';
-
-                        turns.forEach(turn => {
-                            // Each turn may have: [id, [content_parts], role, ...]
-                            const content = turn[1]?.[0] || turn[2]?.[0] || '';
-                            const role = turn[3] || turn[0] || '';
-
-                            // Detect user vs assistant
-                            const isUser = role === 0 || role === 'user' ||
-                                (typeof content === 'string' && turn.length < 10);
-
-                            if (isUser) {
-                                currentQuery = typeof content === 'string' ? content : JSON.stringify(content);
-                            } else if (currentQuery) {
-                                const answer = typeof content === 'string' ? content :
-                                    (content?.join?.('\n') || JSON.stringify(content));
-                                entries.push({ query: currentQuery, answer });
-                                currentQuery = '';
+                        // Try multiple parsing strategies
+                        let data = null;
+                        const dataStr = response[0]?.[2];
+                        
+                        if (dataStr) {
+                            try {
+                                data = JSON.parse(dataStr);
+                            } catch {
+                                console.warn('[Gemini] Could not parse response data string');
+                                continue;
                             }
-                        });
-                    }
+                        }
 
-                    if (entries.length > 0) {
-                        console.log(`[GeminiAdapter] API success: ${entries.length} entries`);
-                        const title = data[0]?.[0] || data[1]?.[0] ||
-                            document.title?.replace(' - Gemini', '').trim() ||
-                            'Gemini Conversation';
-                        return { uuid, title, platform: 'Gemini', entries };
+                        if (!data) continue;
+
+                        const entries = [];
+                        
+                        // Strategy 1: Array of turns
+                        const turns = data[0] || data[1] || data;
+                        if (Array.isArray(turns) && turns.length > 0) {
+                            let currentQuery = '';
+
+                            turns.forEach((turn, idx) => {
+                                // Multiple content extraction methods
+                                let content = turn[1]?.[0] || turn[2]?.[0] || turn[0] || '';
+                                const role = turn[3] || turn[2] || idx % 2;
+
+                                // Clean content if it's an object
+                                if (typeof content !== 'string') {
+                                    content = Array.isArray(content) ? content.join('\n') : JSON.stringify(content);
+                                }
+
+                                // Detect role
+                                const isUser = role === 0 || role === 'user' || role === 'USER' ||
+                                              (idx % 2 === 0 && turn.length < 5);
+
+                                if (isUser && content.trim()) {
+                                    currentQuery = content.trim();
+                                } else if (!isUser && currentQuery && content.trim()) {
+                                    entries.push({ query: currentQuery, answer: content.trim() });
+                                    currentQuery = '';
+                                }
+                            });
+                        }
+
+                        if (entries.length > 0) {
+                            console.log(`[Gemini] ✓ API success with ${rpcId}: ${entries.length} entries`);
+                            const title = data[0]?.[0] || data.title ||
+                                document.title?.replace(' - Gemini', '').trim() ||
+                                entries[0]?.query?.substring(0, 100) ||
+                                'Gemini Conversation';
+                            return { uuid, title, platform: 'Gemini', entries };
+                        }
+                    } catch (e) {
+                        console.warn(`[Gemini] Payload attempt failed:`, e.message);
                     }
                 }
+            } catch (e) {
+                console.warn(`[Gemini] RPC ${rpcId} failed:`, e.message);
             }
-        } catch (e) {
-            console.warn('[GeminiAdapter] API failed:', e.message);
         }
 
         // DOM Fallback
-        console.warn('[GeminiAdapter] Using DOM extraction');
+        console.warn('[Gemini] All API attempts failed, using DOM extraction');
         return GeminiAdapter.extractFromDOM(uuid);
     },
 
     // ============================================
     // DOM Fallback (multiple strategies)
+    // FIXED: Updated selectors for latest Gemini UI
     // ============================================
     extractFromDOM: function (uuid) {
+        console.log('[Gemini] Starting DOM extraction...');
         const messages = [];
 
-        // Strategy 1: Query/Response blocks
-        const userQueries = document.querySelectorAll(
-            '[data-query-text], [class*="query-text"], [class*="user-input"], ' +
-            '[class*="prompt-text"], div[data-message-author-role="user"]'
-        );
-        const aiResponses = document.querySelectorAll(
-            '[data-model-response], [class*="model-response"], [class*="response-text"], ' +
-            '[class*="ai-response"], div[data-message-author-role="assistant"], model-response'
-        );
-
-        if (userQueries.length > 0 || aiResponses.length > 0) {
-            const max = Math.max(userQueries.length, aiResponses.length);
-            for (let i = 0; i < max; i++) {
-                messages.push({
-                    query: userQueries[i]?.innerText?.trim() || '',
-                    answer: aiResponses[i]?.innerText?.trim() || ''
-                });
-            }
-        }
-
-        // Strategy 2: Article elements
-        if (messages.length === 0) {
-            const articles = document.querySelectorAll('article, [role="article"]');
+        // Strategy 1: Modern Gemini UI - message containers with data attributes
+        const messageContainers = document.querySelectorAll('[data-message-author-role], message-content, [class*="message"]');
+        if (messageContainers.length > 0) {
+            console.log(`[Gemini] Strategy 1: Found ${messageContainers.length} message containers`);
+            
             let currentQuery = '';
-            articles.forEach((article, i) => {
-                const text = article.innerText?.trim() || '';
-                if (text.length > 10) {
-                    if (i % 2 === 0) {
+            messageContainers.forEach(container => {
+                const role = container.getAttribute('data-message-author-role') ||
+                           (container.className.includes('user') ? 'user' : 'model');
+                const text = container.innerText?.trim() || '';
+
+                if (text.length > 5) {
+                    if (role === 'user') {
                         currentQuery = text;
-                    } else {
+                    } else if (role === 'model' && currentQuery) {
                         messages.push({ query: currentQuery, answer: text });
                         currentQuery = '';
                     }
@@ -474,25 +505,78 @@ const GeminiAdapter = {
             });
         }
 
-        // Strategy 3: Main content scraping
+        // Strategy 2: Query-response pairs
         if (messages.length === 0) {
-            const mainContent = document.querySelector('main, [role="main"]');
-            if (mainContent) {
-                const allDivs = mainContent.querySelectorAll('div');
-                const textBlocks = [];
-                allDivs.forEach(div => {
-                    if (div.children.length === 0 && div.innerText?.trim().length > 20) {
-                        textBlocks.push(div.innerText.trim());
-                    }
-                });
-                for (let i = 0; i < textBlocks.length - 1; i += 2) {
-                    messages.push({ query: textBlocks[i] || '', answer: textBlocks[i + 1] || '' });
+            console.log('[Gemini] Strategy 2: Query-response pairs');
+            
+            const userQueries = document.querySelectorAll(
+                '[data-query-text], [class*="user-query"], [class*="prompt-text"], ' +
+                '.query-content, user-message'
+            );
+            const aiResponses = document.querySelectorAll(
+                '[data-model-response], [class*="model-response"], model-response, ' +
+                '.response-content, model-message'
+            );
+
+            const max = Math.max(userQueries.length, aiResponses.length);
+            for (let i = 0; i < max; i++) {
+                const query = userQueries[i]?.innerText?.trim() || '';
+                const answer = aiResponses[i]?.innerText?.trim() || '';
+                if (query || answer) {
+                    messages.push({ query, answer });
                 }
             }
         }
 
-        const filteredMessages = messages.filter(m => m.query || m.answer);
-        const title = document.title?.replace(' - Gemini', '')?.replace('Google Gemini', '')?.trim() || 'Gemini Conversation';
+        // Strategy 3: Alternating blocks in main content
+        if (messages.length === 0) {
+            console.log('[Gemini] Strategy 3: Alternating blocks');
+            
+            const mainContent = document.querySelector('main, [role="main"], .conversation-container');
+            if (mainContent) {
+                const blocks = mainContent.querySelectorAll('div[class*="turn"], div[class*="message-turn"]');
+                
+                if (blocks.length > 0) {
+                    let currentQuery = '';
+                    blocks.forEach((block, i) => {
+                        const text = block.innerText?.trim();
+                        if (text && text.length > 10) {
+                            if (i % 2 === 0) {
+                                currentQuery = text;
+                            } else {
+                                messages.push({ query: currentQuery, answer: text });
+                                currentQuery = '';
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        // Strategy 4: Generic text extraction
+        if (messages.length === 0) {
+            console.log('[Gemini] Strategy 4: Generic extraction');
+            
+            const allText = [];
+            const textElements = document.querySelectorAll('p, div[class*="text"]');
+            textElements.forEach(el => {
+                const text = el.innerText?.trim();
+                if (text && text.length > 30 && !allText.includes(text)) {
+                    allText.push(text);
+                }
+            });
+            
+            for (let i = 0; i < allText.length - 1; i += 2) {
+                messages.push({ query: allText[i], answer: allText[i + 1] });
+            }
+        }
+
+        const filteredMessages = messages.filter(m => m.query?.trim() && m.answer?.trim());
+        console.log(`[Gemini] ✓ DOM extraction complete: ${filteredMessages.length} message pairs`);
+        
+        const title = document.title?.replace(' - Gemini', '').replace('Google Gemini', '').trim() ||
+                     filteredMessages[0]?.query?.substring(0, 100) ||
+                     'Gemini Conversation';
 
         return { uuid, title, platform: 'Gemini', entries: filteredMessages };
     },

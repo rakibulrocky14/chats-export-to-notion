@@ -146,6 +146,23 @@ body {
     gap: 8px;
 }
 
+.platform-icon-display {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+}
+
+.platform-icon {
+    width: 20px;
+    height: 20px;
+    display: none;
+}
+
 .platform-selector {
     padding: 8px 12px;
     border-radius: 8px;
@@ -158,6 +175,7 @@ body {
     min-width: 180px;
     transition: 0.15s;
 }
+
 
 .platform-selector:hover {
     border-color: var(--accent);
@@ -193,6 +211,74 @@ body {
     background: var(--accent);
     color: white;
     border-color: var(--accent);
+}
+
+/* ============================================ */
+/* NOTION OAUTH */
+/* ============================================ */
+.security-notice {
+    padding: 10px;
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--danger);
+    margin-bottom: 12px;
+}
+
+.notion-auth-grid {
+    display: grid;
+    gap: 14px;
+}
+
+.auth-methods {
+    display: flex;
+    gap: 16px;
+    margin-top: 6px;
+}
+
+.notion-oauth-section,
+.notion-token-section {
+    padding: 12px;
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.redirect-uri-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.redirect-uri-row input {
+    flex: 1;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+    margin-left: 8px;
+}
+
+.status-pill.connected {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--success);
+}
+
+.hint {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.btn-small.danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
 }
 
 /* ============================================ */

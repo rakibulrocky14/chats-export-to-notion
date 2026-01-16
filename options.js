@@ -935,6 +935,61 @@ async function monitorConnectionStatus() {
     }
 }
 // ============================================
+// NOTION OAUTH HELPERS
+// ============================================
+function toggleNotionAuthSections(method) {
+    const oauthSection = document.getElementById('notionOauthSection');
+    const tokenSection = document.getElementById('notionTokenSection');
+    if (!oauthSection || !tokenSection) return;
+    if (method === 'token') {
+        oauthSection.style.display = 'none';
+        tokenSection.style.display = 'block';
+    } else {
+        oauthSection.style.display = 'block';
+        tokenSection.style.display = 'none';
+    }
+}
+
+function updateOauthStatus(data) {
+    const statusEl = document.getElementById('notionOauthStatus');
+    if (!statusEl) return;
+    const connected = !!data?.notion_oauth_workspace_name;
+    if (connected) {
+        statusEl.textContent = `Connected: ${data.notion_oauth_workspace_name}`;
+        statusEl.classList.add('connected');
+    } else {
+        statusEl.textContent = 'Not connected';
+        statusEl.classList.remove('connected');
+    }
+}
+
+async function resolveNotionToken() {
+    if (typeof NotionOAuth === 'undefined') {
+        throw new Error('OAuth module not loaded');
+    }
+    return NotionOAuth.getActiveToken();
+}
+
+async function handleOauthConnect() {
+    try {
+        await saveAllSettings();
+        await NotionOAuth.init();
+        await NotionOAuth.authorize();
+        const status = await NotionOAuth.getStatus();
+        updateOauthStatus({ notion_oauth_workspace_name: status.workspace });
+        log('✅ OAuth2 connected successfully', 'success');
+    } catch (error) {
+        log(`OAuth connection failed: ${error.message}`, 'error');
+    }
+}
+
+async function handleOauthDisconnect() {
+    await NotionOAuth.disconnect();
+    updateOauthStatus({});
+    log('OAuth disconnected', 'info');
+}
+
+// ============================================
 // INITIALIZATION
 // ============================================
 document.addEventListener('DOMContentLoaded', async () => {
@@ -944,7 +999,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initDateFilter();
 
     // Load persisted data
-    loadSettings();
+    await loadSettings();
     loadExportedUuids();
     loadExportHistory();
     loadFailures();
@@ -988,6 +1043,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Event Listeners - Header
     document.getElementById('autoSyncToggle').addEventListener('click', toggleAutoSync);
+
+    // OAuth UI events
+    document.querySelectorAll('input[name="notionAuthMethod"]').forEach((input) => {
+        input.addEventListener('change', (e) => {
+            toggleNotionAuthSections(e.target.value);
+        });
+    });
+    document.getElementById('copyRedirectUri')?.addEventListener('click', () => {
+        const input = document.getElementById('notionOauthRedirectUri');
+        if (input) {
+            navigator.clipboard.writeText(input.value);
+            log('Redirect URI copied', 'info');
+        }
+    });
+    document.getElementById('connectNotionOauth')?.addEventListener('click', handleOauthConnect);
+    document.getElementById('disconnectNotionOauth')?.addEventListener('click', handleOauthDisconnect);
+
+    // Load NotionOAuth module
+    if (typeof NotionOAuth !== 'undefined') {
+        await NotionOAuth.init();
+    }
+
 
     // Platform selector events
     document.getElementById('platformSelector').addEventListener('change', (e) => {
@@ -1109,9 +1186,10 @@ function initDateFilter() {
 // ============================================
 // STORAGE & SETTINGS PERSISTENCE
 // ============================================
-function loadSettings() {
-    chrome.storage.local.get([
+async function loadSettings() {
+    const data = await chrome.storage.local.get([
         'notionApiKey',
+        'notionKey',
         'notionDbId',
         'syncInterval',
         'autoSyncNotion',
@@ -1119,49 +1197,79 @@ function loadSettings() {
         'syncImages',
         'syncCitations',
         'skipExported',
-        'autoSyncEnabled'
-    ], (data) => {
-        // Notion credentials
-        if (data.notionApiKey) {
-            document.getElementById('notionKey').value = data.notionApiKey;
-        }
-        if (data.notionDbId) {
-            document.getElementById('notionDbId').value = data.notionDbId;
-        }
+        'autoSyncEnabled',
+        'notion_auth_method',
+        'notion_oauth_client_id',
+        'notion_oauth_client_secret',
+        'notion_oauth_workspace_name',
+        'notion_oauth_token_expires'
+    ]);
 
-        // Sync settings
-        if (data.syncInterval) {
-            document.getElementById('syncInterval').value = data.syncInterval;
-        }
-        if (data.autoSyncNotion) {
-            document.getElementById('autoSyncNotion').checked = true;
-        }
-        if (data.includeMetadata) {
-            document.getElementById('includeMetadata').checked = true;
-        }
-        if (data.syncImages !== false) { // Default true
-            document.getElementById('syncImages').checked = true;
-        }
-        if (data.syncCitations !== false) { // Default true
-            document.getElementById('syncCitations').checked = true;
-        }
-        if (data.skipExported !== false) { // Default true
-            document.getElementById('skipExported').checked = true;
-        }
+    // Migrate legacy key
+    if (!data.notionApiKey && data.notionKey) {
+        await chrome.storage.local.set({ notionApiKey: data.notionKey });
+    }
 
-        // Auto-sync toggle in header
-        if (data.autoSyncEnabled) {
-            const btn = document.getElementById('autoSyncToggle');
-            btn.classList.add('active');
-            btn.querySelector('span').textContent = 'Auto On';
-        }
+    // Notion credentials
+    if (data.notionApiKey || data.notionKey) {
+        document.getElementById('notionKey').value = data.notionApiKey || data.notionKey;
+    }
+    if (data.notionDbId) {
+        document.getElementById('notionDbId').value = data.notionDbId;
+    }
 
-        log('Settings loaded from storage', 'info');
-    });
+    // OAuth credentials
+    if (data.notion_oauth_client_id) {
+        document.getElementById('notionOauthClientId').value = data.notion_oauth_client_id;
+    }
+    if (data.notion_oauth_client_secret) {
+        document.getElementById('notionOauthClientSecret').value = data.notion_oauth_client_secret;
+    }
+
+    // Redirect URI
+    const redirectUri = chrome.identity.getRedirectURL('notion');
+    document.getElementById('notionOauthRedirectUri').value = redirectUri;
+
+    // Auth method
+    const authMethod = data.notion_auth_method || 'oauth';
+    const authRadio = document.querySelector(`input[name="notionAuthMethod"][value="${authMethod}"]`);
+    if (authRadio) authRadio.checked = true;
+    toggleNotionAuthSections(authMethod);
+    updateOauthStatus(data);
+
+    // Sync settings
+    if (data.syncInterval) {
+        document.getElementById('syncInterval').value = data.syncInterval;
+    }
+    if (data.autoSyncNotion) {
+        document.getElementById('autoSyncNotion').checked = true;
+    }
+    if (data.includeMetadata) {
+        document.getElementById('includeMetadata').checked = true;
+    }
+    if (data.syncImages !== false) { // Default true
+        document.getElementById('syncImages').checked = true;
+    }
+    if (data.syncCitations !== false) { // Default true
+        document.getElementById('syncCitations').checked = true;
+    }
+    if (data.skipExported !== false) { // Default true
+        document.getElementById('skipExported').checked = true;
+    }
+
+    // Auto-sync toggle in header
+    if (data.autoSyncEnabled) {
+        const btn = document.getElementById('autoSyncToggle');
+        btn.classList.add('active');
+        btn.querySelector('span').textContent = 'Auto On';
+    }
+
+    log('Settings loaded from storage', 'info');
 }
 
 
-function saveAllSettings() {
+async function saveAllSettings() {
+    const authMethod = document.querySelector('input[name="notionAuthMethod"]:checked')?.value || 'oauth';
     const settings = {
         notionApiKey: InputSanitizer.clean(document.getElementById('notionKey').value.trim()),
         notionDbId: InputSanitizer.clean(document.getElementById('notionDbId').value.trim()),
@@ -1170,11 +1278,14 @@ function saveAllSettings() {
         includeMetadata: document.getElementById('includeMetadata').checked,
         syncImages: document.getElementById('syncImages').checked,
         syncCitations: document.getElementById('syncCitations').checked,
-        skipExported: document.getElementById('skipExported').checked
+        skipExported: document.getElementById('skipExported').checked,
+        notion_auth_method: authMethod,
+        notion_oauth_client_id: InputSanitizer.clean(document.getElementById('notionOauthClientId').value.trim()),
+        notion_oauth_client_secret: InputSanitizer.clean(document.getElementById('notionOauthClientSecret').value.trim())
     };
 
-    // Notion API key validation
-    if (settings.notionApiKey && !settings.notionApiKey.startsWith('secret_') && !settings.notionApiKey.startsWith('ntn_')) {
+    // Notion API key validation (only if token selected)
+    if (authMethod === 'token' && settings.notionApiKey && !settings.notionApiKey.startsWith('secret_') && !settings.notionApiKey.startsWith('ntn_')) {
         log('⚠️ Invalid Notion API Key format. Should start with secret_ or ntn_', 'error');
         return;
     }
@@ -1184,30 +1295,28 @@ function saveAllSettings() {
         return;
     }
 
-    chrome.storage.local.set(settings, () => {
-        log('✅ All settings saved successfully!', 'success');
+    await chrome.storage.local.set(settings);
+    log('✅ All settings saved successfully!', 'success');
 
-        // Show confirmation
-        const btn = document.getElementById('saveAllSettings');
-        const originalText = btn.innerHTML;
-        btn.innerHTML = '✅ Saved!';
-        btn.style.backgroundColor = 'var(--success)';
-        setTimeout(() => {
-            btn.innerHTML = originalText;
-            btn.style.backgroundColor = '';
-        }, 2000);
-    });
+    // Show confirmation
+    const btn = document.getElementById('saveAllSettings');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '✅ Saved!';
+    btn.style.backgroundColor = 'var(--success)';
+    setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.style.backgroundColor = '';
+    }, 2000);
 }
 
 // Test Notion API connection
 async function testNotionConnection() {
     const resultEl = document.getElementById('notionTestResult');
     const btnEl = document.getElementById('testNotionBtn');
-    const apiKey = document.getElementById('notionKey').value;
-    const dbId = document.getElementById('notionDbId').value;
+    const dbId = document.getElementById('notionDbId').value.trim();
 
-    if (!apiKey || !dbId) {
-        resultEl.innerHTML = '❌ Enter API Key and Database ID first';
+    if (!dbId) {
+        resultEl.innerHTML = '❌ Enter Database ID first';
         resultEl.style.color = 'var(--error)';
         return;
     }
@@ -1224,10 +1333,11 @@ async function testNotionConnection() {
     resultEl.innerHTML = '';
 
     try {
+        const token = await resolveNotionToken();
         const response = await fetch(`https://api.notion.com/v1/databases/${dbId}`, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${apiKey}`,
+                'Authorization': `Bearer ${token}`,
                 'Notion-Version': '2022-06-28'
             }
         });

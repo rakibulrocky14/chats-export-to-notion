@@ -565,10 +565,24 @@ async function saveToNotion() {
             LoadingManager.show('saveToNotionBtn', '⏳');
             setStatus('Syncing to Notion...', 'info');
 
-            // Check Notion credentials
-            const storage = await chrome.storage.local.get(['notionApiKey', 'notionDbId']);
-            if (!storage.notionApiKey || !storage.notionDbId) {
+            const storage = await chrome.storage.local.get(['notionDbId']);
+            if (!storage.notionDbId) {
                 setStatus('Configure Notion in Settings', 'error');
+                LoadingManager.hide('saveToNotionBtn');
+                return;
+            }
+
+            if (typeof NotionOAuth === 'undefined') {
+                setStatus('OAuth module not loaded', 'error');
+                LoadingManager.hide('saveToNotionBtn');
+                return;
+            }
+
+            let token;
+            try {
+                token = await NotionOAuth.getActiveToken();
+            } catch (error) {
+                setStatus(error.message || 'Notion auth missing', 'error');
                 LoadingManager.hide('saveToNotionBtn');
                 return;
             }
@@ -593,7 +607,7 @@ async function saveToNotion() {
                     }
 
                     try {
-                        await syncToNotionAPI(response.data, storage.notionApiKey, storage.notionDbId);
+                        await syncToNotionAPI(response.data, token, storage.notionDbId);
                         setStatus('✅ Saved to Notion!', 'success');
                     } catch (notionErr) {
                         setStatus(`Error: ${notionErr.message}`, 'error');

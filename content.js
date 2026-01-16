@@ -667,6 +667,7 @@ const ChatGPTAdapter = {
     // ============================================
     // ENTERPRISE: Get anti-bot headers
     // ChatGPT uses OAI-Device-Id for bot detection
+    // FIXED: Added more comprehensive header extraction
     // ============================================
     _getHeaders: () => {
         const headers = {
@@ -675,15 +676,29 @@ const ChatGPTAdapter = {
             'Content-Type': 'application/json',
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin'
+            'Sec-Fetch-Site': 'same-origin',
+            'User-Agent': navigator.userAgent
         };
 
         // Get OAI headers from localStorage (set by ChatGPT)
         try {
             const deviceId = localStorage.getItem('oai-device-id');
-            if (deviceId) headers['OAI-Device-Id'] = deviceId;
+            if (deviceId) {
+                headers['OAI-Device-Id'] = deviceId;
+                console.log('[ChatGPT] Using OAI-Device-Id:', deviceId.substring(0, 8) + '...');
+            }
+            
+            // Try to get session token
+            const sessionToken = localStorage.getItem('sessionToken') || 
+                                localStorage.getItem('__Secure-next-auth.session-token');
+            if (sessionToken) {
+                console.log('[ChatGPT] Found session token');
+            }
+            
             headers['OAI-Language'] = 'en-US';
-        } catch { }
+        } catch (e) {
+            console.warn('[ChatGPT] Could not read localStorage:', e.message);
+        }
 
         return headers;
     },
@@ -847,24 +862,41 @@ const ChatGPTAdapter = {
 
     // ============================================
     // ENTERPRISE: Resilient thread detail fetching
+    // FIXED: Added multiple endpoint fallbacks and better error handling
     // ============================================
     getThreadDetail: async (uuid) => {
-        // Strategy 1: API fetch with retry
-        try {
-            const baseUrl = platformConfig.getBaseUrl('ChatGPT');
-            const endpoint = platformConfig.buildEndpoint('ChatGPT', 'conversationDetail', { uuid });
-            const url = `${baseUrl}${endpoint}`;
+        // Strategy 1: API fetch with retry (multiple endpoint attempts)
+        const endpoints = [
+            `/backend-api/conversation/${uuid}`,
+            `/api/conversation/${uuid}`,
+            `/backend-api/conversations/${uuid}`
+        ];
 
-            const response = await ChatGPTAdapter._fetchWithRetry(url);
-            const data = await response.json();
-            const entries = transformChatGPTData(data);
+        for (const endpoint of endpoints) {
+            try {
+                const baseUrl = platformConfig.getBaseUrl('ChatGPT');
+                const url = `${baseUrl}${endpoint}`;
+                console.log(`[ChatGPT] Trying endpoint: ${endpoint}`);
 
-            if (entries.length > 0) {
-                console.log(`[ChatGPT] API success: ${entries.length} entries for ${uuid}`);
-                return { uuid, entries, title: data.title, platform: 'ChatGPT' };
+                const response = await ChatGPTAdapter._fetchWithRetry(url, {}, 2);
+                const data = await response.json();
+                
+                // Validate response structure
+                if (!data || (!data.mapping && !data.messages && !data.conversation)) {
+                    console.warn('[ChatGPT] Invalid response structure from:', endpoint);
+                    continue;
+                }
+
+                const entries = transformChatGPTData(data);
+
+                if (entries.length > 0) {
+                    console.log(`[ChatGPT] ✓ API success: ${entries.length} entries for ${uuid}`);
+                    return { uuid, entries, title: data.title || 'ChatGPT Chat', platform: 'ChatGPT' };
+                }
+            } catch (error) {
+                console.warn(`[ChatGPT] Endpoint ${endpoint} failed:`, error.message);
+                continue;
             }
-        } catch (error) {
-            console.warn('[ChatGPT] API failed:', error.message);
         }
 
         // Strategy 2: Check if this is the current conversation
@@ -874,41 +906,39 @@ const ChatGPTAdapter = {
             return ChatGPTAdapter.extractFromDOM(uuid);
         }
 
-        // Strategy 3: Return error for non-current conversations
-        console.error('[ChatGPT] Cannot fetch conversation', uuid, '- API failed and not current page');
+        // Strategy 3: Return helpful error
+        console.error('[ChatGPT] All API endpoints failed for conversation:', uuid);
         return {
             uuid,
             title: 'Unable to fetch - API error',
             platform: 'ChatGPT',
             entries: [],
-            error: 'API access failed - can only export current conversation'
+            error: 'All API endpoints failed. Try opening the conversation in your browser first, then export again.'
         };
     },
 
+    /**
+     * Extract messages from DOM when API fails
+     * FIXED: Updated selectors for latest ChatGPT UI (2024+)
+     */
     extractFromDOM: (uuid) => {
         console.log('[ChatGPT] Starting DOM extraction...');
         const messages = [];
 
-        // Strategy 1: Look for message containers with data attributes
-        const messageContainers = document.querySelectorAll(
-            '[data-message-author-role], ' +
-            '[data-message-id], ' +
-            '[class*="message"]'
-        );
-
+        // Strategy 1: Modern ChatGPT UI - data-message-author-role attribute
+        const messageContainers = document.querySelectorAll('[data-message-author-role]');
         if (messageContainers.length > 0) {
-            console.log(`[ChatGPT] Strategy 1: Found ${messageContainers.length} message containers`);
+            console.log(`[ChatGPT] Strategy 1: Found ${messageContainers.length} messages with data-message-author-role`);
 
             let currentQuery = '';
             messageContainers.forEach(container => {
-                const role = container.getAttribute('data-message-author-role') ||
-                    (container.className.includes('user') ? 'user' : 'assistant');
+                const role = container.getAttribute('data-message-author-role');
                 const text = container.innerText?.trim() || '';
 
                 if (text.length > 5) {
                     if (role === 'user') {
                         currentQuery = text;
-                    } else if (currentQuery) {
+                    } else if (role === 'assistant' && currentQuery) {
                         messages.push({ query: currentQuery, answer: text });
                         currentQuery = '';
                     }
@@ -916,78 +946,72 @@ const ChatGPTAdapter = {
             });
         }
 
-        // Strategy 2: Article elements (ChatGPT uses article tags)
+        // Strategy 2: Article elements with role detection
         if (messages.length === 0) {
             const articles = document.querySelectorAll('article, [data-testid*="conversation-turn"]');
             console.log(`[ChatGPT] Strategy 2: Found ${articles.length} articles`);
 
             let currentQuery = '';
-            articles.forEach((article, i) => {
+            articles.forEach((article) => {
                 const text = article.innerText?.trim() || '';
-                if (text.length > 10) {
-                    // Even indices are typically user, odd are assistant
-                    if (i % 2 === 0) {
-                        currentQuery = text;
-                    } else {
-                        messages.push({ query: currentQuery, answer: text });
-                        currentQuery = '';
-                    }
+                if (text.length < 10) return;
+
+                // Check for role indicators in parent or article itself
+                const isUser = article.closest('[data-message-author-role="user"]') ||
+                              article.querySelector('[data-message-author-role="user"]') ||
+                              text.toLowerCase().includes('you said');
+                
+                if (isUser) {
+                    currentQuery = text;
+                } else if (currentQuery) {
+                    messages.push({ query: currentQuery, answer: text });
+                    currentQuery = '';
                 }
             });
         }
 
-        // Strategy 3: Prose/markdown containers
+        // Strategy 3: Alternating message blocks (fallback)
         if (messages.length === 0) {
-            console.log('[ChatGPT] Strategy 3: Prose containers');
-
-            const proseBlocks = document.querySelectorAll('.prose, [class*="markdown"], [class*="response"]');
-            const userBlocks = document.querySelectorAll('[class*="request"], [class*="user-message"]');
-
-            const max = Math.max(userBlocks.length, proseBlocks.length);
-            for (let i = 0; i < max; i++) {
-                messages.push({
-                    query: userBlocks[i]?.innerText?.trim() || '',
-                    answer: proseBlocks[i]?.innerText?.trim() || ''
-                });
-            }
-        }
-
-        // Strategy 4: Main content text extraction
-        if (messages.length === 0) {
-            console.log('[ChatGPT] Strategy 4: Main content extraction');
-
-            const main = document.querySelector('main, [role="main"]');
-            if (main) {
-                const allText = [];
-                const blocks = main.querySelectorAll('div > div > div');
-
-                blocks.forEach(block => {
-                    const text = block.innerText?.trim();
-                    if (text && text.length > 30 && !allText.includes(text)) {
-                        allText.push(text);
+            console.log('[ChatGPT] Strategy 3: Alternating blocks');
+            
+            const allBlocks = Array.from(document.querySelectorAll('main [class*="group"], main > div > div > div'));
+            const textBlocks = [];
+            
+            allBlocks.forEach(block => {
+                const text = block.innerText?.trim();
+                if (text && text.length > 20) {
+                    // Avoid duplicates
+                    if (!textBlocks.includes(text)) {
+                        textBlocks.push(text);
                     }
-                });
+                }
+            });
 
-                for (let i = 0; i < allText.length - 1; i += 2) {
+            // Pair them alternately (user, assistant, user, assistant...)
+            for (let i = 0; i < textBlocks.length - 1; i += 2) {
+                if (textBlocks[i] && textBlocks[i + 1]) {
                     messages.push({
-                        query: allText[i] || '',
-                        answer: allText[i + 1] || ''
+                        query: textBlocks[i],
+                        answer: textBlocks[i + 1]
                     });
                 }
             }
         }
 
-        console.log(`[ChatGPT] DOM extraction complete: ${messages.length} message pairs`);
+        console.log(`[ChatGPT] ✓ DOM extraction complete: ${messages.length} message pairs`);
 
+        // Extract title from multiple sources
         const title = document.title?.replace(' | ChatGPT', '').replace(' - ChatGPT', '').trim() ||
             document.querySelector('h1')?.textContent?.trim() ||
+            document.querySelector('[class*="conversation-title"]')?.textContent?.trim() ||
+            messages[0]?.query?.substring(0, 100) ||
             'ChatGPT Conversation';
 
         return {
             uuid: uuid,
             title: title,
             platform: 'ChatGPT',
-            entries: messages.filter(m => m.query || m.answer)
+            entries: messages.filter(m => m.query?.trim() && m.answer?.trim())
         };
     },
 

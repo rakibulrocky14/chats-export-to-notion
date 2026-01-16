@@ -34,59 +34,12 @@
                 <div class="platform-selector-container">
                     <!-- Platform Icon Display -->
                     <div id="platformIconDisplay" class="platform-icon-display">
-                        <!-- Perplexity -->
-                        <svg class="platform-icon" data-platform="Perplexity" viewBox="0 0 24 24" width="24" height="24"
-                            style="display:none;">
-                            <circle cx="12" cy="12" r="9" fill="none" stroke="#20B2AA" stroke-width="2" />
-                            <path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke="#20B2AA" stroke-width="2"
-                                stroke-linecap="round" />
-                            <circle cx="12" cy="12" r="3" fill="#20B2AA" />
-                        </svg>
-                        <!-- ChatGPT -->
-                        <svg class="platform-icon" data-platform="ChatGPT" viewBox="0 0 24 24" width="24" height="24"
-                            style="display:none;">
-                            <path fill="#10a37f"
-                                d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073z" />
-                        </svg>
-                        <!-- Claude -->
-                        <svg class="platform-icon" data-platform="Claude" viewBox="0 0 24 24" width="24" height="24"
-                            style="display:none;">
-                            <path fill="#cc785c"
-                                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" />
-                            <circle cx="12" cy="12" r="5" fill="#cc785c" />
-                        </svg>
-                        <!-- Gemini -->
-                        <svg class="platform-icon" data-platform="Gemini" viewBox="0 0 24 24" width="24" height="24"
-                            style="display:none;">
-                            <defs>
-                                <linearGradient id="gemGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#4285F4" />
-                                    <stop offset="50%" style="stop-color:#9B72CB" />
-                                    <stop offset="100%" style="stop-color:#D96570" />
-                                </linearGradient>
-                            </defs>
-                            <path fill="url(#gemGrad)"
-                                d="M12 2L14.5 9L22 9L16 13.5L18 21L12 17L6 21L8 13.5L2 9L9.5 9L12 2Z" />
-                        </svg>
-                        <!-- Grok -->
-                        <svg class="platform-icon" data-platform="Grok" viewBox="0 0 24 24" width="24" height="24"
-                            style="display:none;">
-                            <path fill="#ffffff"
-                                d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                        </svg>
-                        <!-- DeepSeek -->
-                        <svg class="platform-icon" data-platform="DeepSeek" viewBox="0 0 24 24" width="24" height="24"
-                            style="display:none;">
-                            <defs>
-                                <linearGradient id="dsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#4F46E5" />
-                                    <stop offset="100%" style="stop-color:#06B6D4" />
-                                </linearGradient>
-                            </defs>
-                            <circle cx="12" cy="12" r="10" fill="url(#dsGrad)" />
-                            <path d="M8 12c0-2.2 1.8-4 4-4M16 12c0 2.2-1.8 4-4 4" stroke="white" stroke-width="2"
-                                fill="none" stroke-linecap="round" />
-                        </svg>
+                        <img class="platform-icon" data-platform="Perplexity" src="icons/logos/perplexity.svg" alt="Perplexity" />
+                        <img class="platform-icon" data-platform="ChatGPT" src="icons/logos/chatgpt.svg" alt="ChatGPT" />
+                        <img class="platform-icon" data-platform="Claude" src="icons/logos/claude.svg" alt="Claude" />
+                        <img class="platform-icon" data-platform="Gemini" src="icons/logos/gemini.svg" alt="Gemini" />
+                        <img class="platform-icon" data-platform="Grok" src="icons/logos/grok.svg" alt="Grok" />
+                        <img class="platform-icon" data-platform="DeepSeek" src="icons/logos/deepseek.svg" alt="DeepSeek" />
                     </div>
                     <select id="platformSelector" class="platform-selector" title="Select AI Platform">
                         <option value="">Detecting platforms...</option>
@@ -255,25 +208,67 @@
                                 </svg> Notion Integration</h3>
                         </div>
                         <div class="card-body">
-                            <!-- Fix 14: Security Notice -->
-                            <div class="security-notice"
-                                style="padding: 10px; background: rgba(239, 68, 68, 0.1); border-radius: 6px; font-size: 11px; color: var(--danger); margin-bottom: 12px;">
-                                <strong>⚠️ Security Notice:</strong> Your Notion API key is stored locally in your
+                            <div class="security-notice">
+                                <strong>⚠️ Security Notice:</strong> Your Notion credentials are stored locally in your
                                 browser. Never share your extension data or sync settings across untrusted devices.
                             </div>
-                            <div class="setting-item">
-                                <label>API Key / Token</label>
-                                <input type="password" id="notionKey" placeholder="secret_...">
-                            </div>
-                            <div class="setting-item">
-                                <label>Database ID</label>
-                                <input type="text" id="notionDbId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-                            </div>
-                            <div class="setting-item">
-                                <button id="testNotionBtn" class="btn-small" style="margin-top: 10px;">
-                                    🔌 Test Connection
-                                </button>
-                                <span id="notionTestResult" style="margin-left: 10px; font-size: 0.85rem;"></span>
+
+                            <div class="notion-auth-grid">
+                                <div class="setting-item">
+                                    <label>Auth Method</label>
+                                    <div class="auth-methods">
+                                        <label class="radio-option">
+                                            <input type="radio" name="notionAuthMethod" value="oauth" checked>
+                                            <span>OAuth2 (Recommended)</span>
+                                        </label>
+                                        <label class="radio-option">
+                                            <input type="radio" name="notionAuthMethod" value="token">
+                                            <span>Token</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div id="notionOauthSection" class="notion-oauth-section">
+                                    <div class="setting-item">
+                                        <label>OAuth Client ID</label>
+                                        <input type="text" id="notionOauthClientId" placeholder="your-client-id">
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>OAuth Client Secret</label>
+                                        <input type="password" id="notionOauthClientSecret" placeholder="your-client-secret">
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>Redirect URI</label>
+                                        <div class="redirect-uri-row">
+                                            <input type="text" id="notionOauthRedirectUri" readonly>
+                                            <button id="copyRedirectUri" class="btn-small">Copy</button>
+                                        </div>
+                                        <small class="hint">Register this URL in your Notion integration settings.</small>
+                                    </div>
+                                    <div class="setting-item">
+                                        <button id="connectNotionOauth" class="btn-small">🔐 Connect OAuth2</button>
+                                        <button id="disconnectNotionOauth" class="btn-small danger">Disconnect</button>
+                                        <span id="notionOauthStatus" class="status-pill">Not connected</span>
+                                    </div>
+                                </div>
+
+                                <div id="notionTokenSection" class="notion-token-section">
+                                    <div class="setting-item">
+                                        <label>API Key / Token</label>
+                                        <input type="password" id="notionKey" placeholder="secret_...">
+                                    </div>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label>Database ID</label>
+                                    <input type="text" id="notionDbId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                </div>
+                                <div class="setting-item">
+                                    <button id="testNotionBtn" class="btn-small" style="margin-top: 10px;">
+                                        🔌 Test Connection
+                                    </button>
+                                    <span id="notionTestResult" style="margin-left: 10px; font-size: 0.85rem;"></span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -447,14 +442,15 @@
                 <a href="#" class="footer-link">📘 Documentation</a>
                 <a href="#" class="footer-link">💬 Support</a>
             </div>
-            <div class="footer-brand">
-                <span>OmniExporter AI v4.0.0</span>
-                <span class="separator">•</span>
-                <span class="enterprise-tag">Enterprise Edition</span>
-            </div>
+                        <div class="footer-brand">
+                            <span>OmniExporter AI v5.0.0</span>
+                            <span class="separator">•</span>
+                            <span class="enterprise-tag">Enterprise Edition</span>
+                        </div>
         </footer>
     </div>
 
+    <script src="auth/notion-oauth.js"></script>
     <script src="options.js"></script>
 </body>
 

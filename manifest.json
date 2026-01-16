@@ -12,7 +12,8 @@
         "storage",
         "tabs",
         "alarms",
-        "contextMenus"
+        "contextMenus",
+        "identity"
     ],
     "minimum_chrome_version": "88",
     "optional_permissions": [
@@ -99,6 +100,16 @@
             ],
             "matches": [
                 "https://gemini.google.com/*"
+            ]
+        },
+        {
+            "resources": [
+                "auth/callback.html",
+                "auth/notion-oauth.js",
+                "icons/logos/*.svg"
+            ],
+            "matches": [
+                "<all_urls>"
             ]
         }
     ],

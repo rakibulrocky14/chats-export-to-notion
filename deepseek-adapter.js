@@ -53,20 +53,48 @@ const DeepSeekAdapter = {
     // ============================================
     // ENTERPRISE: Get auth token from localStorage
     // DeepSeek stores token as JSON: {value: "...", ...}
+    // FIXED: Added multiple token source attempts
     // ============================================
     _getAuthToken: () => {
         try {
-            const tokenData = localStorage.getItem('userToken');
-            if (!tokenData) return null;
+            // Try multiple possible token storage keys
+            const tokenKeys = [
+                'userToken',
+                'deepseek_token',
+                'auth_token',
+                'access_token',
+                'ds_token'
+            ];
 
-            // Try parsing as JSON (DeepSeek stores {value: "token", ...})
-            try {
-                const parsed = JSON.parse(tokenData);
-                return parsed.value || parsed.token || tokenData;
-            } catch {
-                return tokenData; // Plain string token
+            for (const key of tokenKeys) {
+                try {
+                    const tokenData = localStorage.getItem(key);
+                    if (!tokenData) continue;
+
+                    // Try parsing as JSON first
+                    try {
+                        const parsed = JSON.parse(tokenData);
+                        const token = parsed.value || parsed.token || parsed.access_token;
+                        if (token) {
+                            console.log(`[DeepSeek] Found token in localStorage key: ${key}`);
+                            return token;
+                        }
+                    } catch {
+                        // Not JSON, might be plain string token
+                        if (tokenData.length > 10) {
+                            console.log(`[DeepSeek] Using plain token from key: ${key}`);
+                            return tokenData;
+                        }
+                    }
+                } catch (e) {
+                    continue;
+                }
             }
-        } catch {
+
+            console.warn('[DeepSeek] No auth token found in localStorage');
+            return null;
+        } catch (e) {
+            console.error('[DeepSeek] Error reading auth token:', e.message);
             return null;
         }
     },
@@ -291,112 +319,130 @@ const DeepSeekAdapter = {
     },
 
     // ============================================
-    // Thread Detail - FIXED: Correct response parsing
+    // Thread Detail - FIXED: Multiple endpoint attempts and better parsing
     // Messages are in data.biz_data.chat_messages
     // Role is 'USER' or 'ASSISTANT' (uppercase)
     // ============================================
     getThreadDetail: async (uuid) => {
-        try {
-            console.log(`[DeepSeekAdapter] Fetching thread detail for UUID: ${uuid}`);
+        console.log(`[DeepSeek] Fetching thread detail for UUID: ${uuid}`);
 
-            const response = await DeepSeekAdapter._fetchWithRetry(
-                `${DeepSeekAdapter.apiBase}/chat/history_messages?chat_session_id=${uuid}`
-            );
+        // Try multiple API endpoint variations
+        const endpoints = [
+            `/chat/history_messages?chat_session_id=${uuid}`,
+            `/chat/${uuid}/history_message?lte_cursor.id=`,
+            `/chat_session/${uuid}`,
+            `/chat/${uuid}`
+        ];
 
-            const data = await response.json();
+        for (const endpoint of endpoints) {
+            try {
+                console.log(`[DeepSeek] Trying endpoint: ${endpoint}`);
+                const response = await DeepSeekAdapter._fetchWithRetry(
+                    `${DeepSeekAdapter.apiBase}${endpoint}`,
+                    {},
+                    2  // Max 2 retries per endpoint
+                );
 
-            // FIXED: Correct path is data.biz_data.chat_messages
-            const bizData = data.data?.biz_data || data.biz_data || {};
-            const messages = bizData.chat_messages || bizData.messages || data.data?.messages || [];
+                const data = await response.json();
+                console.log(`[DeepSeek] Response received for ${endpoint}`);
 
-            console.log(`[DeepSeekAdapter] Found ${messages.length} messages for UUID: ${uuid}`);
+                // Try multiple response structure variations
+                let messages = null;
+                let title = 'DeepSeek Conversation';
 
-            if (Array.isArray(messages) && messages.length > 0) {
+                // Path variations for messages
+                const messagePaths = [
+                    data?.data?.biz_data?.chat_messages,
+                    data?.biz_data?.chat_messages,
+                    data?.data?.messages,
+                    data?.messages,
+                    data?.data?.chat_messages,
+                    data?.chat_messages
+                ];
+
+                for (const path of messagePaths) {
+                    if (Array.isArray(path) && path.length > 0) {
+                        messages = path;
+                        break;
+                    }
+                }
+
+                if (!messages || messages.length === 0) {
+                    console.warn(`[DeepSeek] No messages found in endpoint: ${endpoint}`);
+                    continue;
+                }
+
+                console.log(`[DeepSeek] Found ${messages.length} messages`);
+
                 const entries = [];
                 let currentQuery = '';
 
-                messages.forEach(msg => {
-                    // FIXED: Role is uppercase 'USER' / 'ASSISTANT'
-                    const role = (msg.role || msg.author || msg.type || '').toUpperCase();
+                messages.forEach((msg, idx) => {
+                    // Multiple role detection strategies
+                    const role = (msg.role || msg.author || msg.sender || msg.type || '').toUpperCase();
                     const content = msg.content || msg.text || msg.message || '';
 
-                    if (role === 'USER' || role === 'HUMAN') {
-                        currentQuery = content;
-                    } else if ((role === 'ASSISTANT' || role === 'BOT' || role === 'DEEPSEEK') && currentQuery) {
-                        entries.push({ query: currentQuery, answer: content });
+                    if (!content.trim()) return;
+
+                    const isUser = role === 'USER' || role === 'HUMAN' || 
+                                 (role === '' && idx % 2 === 0);
+                    const isAssistant = role === 'ASSISTANT' || role === 'BOT' || 
+                                       role === 'DEEPSEEK' || role === 'AI' ||
+                                       (role === '' && idx % 2 === 1);
+
+                    if (isUser) {
+                        currentQuery = content.trim();
+                    } else if (isAssistant && currentQuery) {
+                        entries.push({ query: currentQuery, answer: content.trim() });
                         currentQuery = '';
                     }
                 });
 
-                // Get title from session info or fallback
-                const title = bizData.chat_session?.title ||
-                    data.data?.title ||
-                    data.title ||
-                    `DeepSeek Thread ${uuid.slice(0, 8)}`;
+                if (entries.length > 0) {
+                    // Get title from multiple possible locations
+                    title = data?.data?.biz_data?.chat_session?.title ||
+                           data?.biz_data?.chat_session?.title ||
+                           data?.data?.title ||
+                           data?.title ||
+                           data?.chat_session?.title ||
+                           entries[0]?.query?.substring(0, 100) ||
+                           `DeepSeek Thread ${uuid.slice(0, 8)}`;
 
-                console.log(`[DeepSeekAdapter] Extracted ${entries.length} Q&A pairs for: ${title}`);
-                return { uuid, title, platform: 'DeepSeek', entries };
+                    console.log(`[DeepSeek] ✓ API success: ${entries.length} Q&A pairs for: ${title}`);
+                    return { uuid, title, platform: 'DeepSeek', entries };
+                }
+            } catch (e) {
+                console.warn(`[DeepSeek] Endpoint ${endpoint} failed:`, e.message);
+                continue;
             }
-        } catch (e) {
-            console.warn('[DeepSeekAdapter] API failed:', e.message);
         }
 
-        // DOM fallback only works for current page - log warning
-        console.warn(`[DeepSeekAdapter] Falling back to DOM extraction (only works for current page)`);
+        // DOM fallback
+        console.warn(`[DeepSeek] All API endpoints failed, using DOM extraction`);
         return DeepSeekAdapter.extractFromDOM(uuid);
     },
 
     // ============================================
-    // DOM Fallback (unchanged)
+    // DOM Fallback - FIXED: Updated selectors for latest DeepSeek UI
     // ============================================
     extractFromDOM: (uuid) => {
+        console.log('[DeepSeek] Starting DOM extraction...');
         const messages = [];
 
-        // Strategy 1: Role-based data attributes
-        const userByRole = document.querySelectorAll('[data-role="user"], [data-message-role="user"]');
-        const assistantByRole = document.querySelectorAll('[data-role="assistant"], [data-message-role="assistant"]');
-        if (userByRole.length > 0 || assistantByRole.length > 0) {
-            const maxLen = Math.max(userByRole.length, assistantByRole.length);
-            for (let i = 0; i < maxLen; i++) {
-                messages.push({
-                    query: userByRole[i]?.textContent?.trim() || '',
-                    answer: assistantByRole[i]?.textContent?.trim() || ''
-                });
-            }
-        }
-
-        // Strategy 2: Class-based selectors
-        if (messages.length === 0) {
-            const userSelectors = ['[class*="user-message"]', '[class*="human-message"]', '.chat-message-user'];
-            const assistantSelectors = ['[class*="assistant-message"]', '[class*="ai-message"]', '.chat-message-assistant'];
-            let userEls = [], assistantEls = [];
-            for (const sel of userSelectors) {
-                const found = document.querySelectorAll(sel);
-                if (found.length > 0) { userEls = Array.from(found); break; }
-            }
-            for (const sel of assistantSelectors) {
-                const found = document.querySelectorAll(sel);
-                if (found.length > 0) { assistantEls = Array.from(found); break; }
-            }
-            const maxLen = Math.max(userEls.length, assistantEls.length);
-            for (let i = 0; i < maxLen; i++) {
-                messages.push({
-                    query: userEls[i]?.textContent?.trim() || '',
-                    answer: assistantEls[i]?.textContent?.trim() || ''
-                });
-            }
-        }
-
-        // Strategy 3: Markdown containers
-        if (messages.length === 0) {
-            const markdownBlocks = document.querySelectorAll('[class*="markdown"], .prose');
+        // Strategy 1: Modern DeepSeek UI - data-message-role or data-role attributes
+        const roleElements = document.querySelectorAll('[data-message-role], [data-role]');
+        if (roleElements.length > 0) {
+            console.log(`[DeepSeek] Strategy 1: Found ${roleElements.length} role-based elements`);
+            
             let currentQuery = '';
-            markdownBlocks.forEach((block, i) => {
-                const text = block.textContent?.trim() || '';
+            roleElements.forEach(el => {
+                const role = (el.getAttribute('data-message-role') || el.getAttribute('data-role') || '').toUpperCase();
+                const text = el.textContent?.trim() || '';
+
                 if (text.length > 5) {
-                    if (i % 2 === 0) {
+                    if (role === 'USER' || role === 'HUMAN') {
                         currentQuery = text;
-                    } else {
+                    } else if ((role === 'ASSISTANT' || role === 'BOT' || role === 'AI') && currentQuery) {
                         messages.push({ query: currentQuery, answer: text });
                         currentQuery = '';
                     }
@@ -404,8 +450,110 @@ const DeepSeekAdapter = {
             });
         }
 
-        const title = document.title?.replace(' - DeepSeek', '').trim() || 'DeepSeek Conversation';
-        return { uuid, title, platform: 'DeepSeek', entries: messages.filter(m => m.query || m.answer) };
+        // Strategy 2: Class-based message detection
+        if (messages.length === 0) {
+            console.log('[DeepSeek] Strategy 2: Class-based detection');
+            
+            const userSelectors = [
+                '[class*="user-message"]',
+                '[class*="human-message"]',
+                '[class*="UserMessage"]',
+                '.message-user',
+                '.chat-message-user'
+            ];
+            const assistantSelectors = [
+                '[class*="assistant-message"]',
+                '[class*="ai-message"]',
+                '[class*="AssistantMessage"]',
+                '.message-assistant',
+                '.chat-message-assistant',
+                '[class*="deepseek-message"]'
+            ];
+
+            let userEls = [], assistantEls = [];
+            
+            for (const sel of userSelectors) {
+                const found = document.querySelectorAll(sel);
+                if (found.length > 0) {
+                    userEls = Array.from(found);
+                    console.log(`[DeepSeek] Found ${userEls.length} user messages with selector: ${sel}`);
+                    break;
+                }
+            }
+            
+            for (const sel of assistantSelectors) {
+                const found = document.querySelectorAll(sel);
+                if (found.length > 0) {
+                    assistantEls = Array.from(found);
+                    console.log(`[DeepSeek] Found ${assistantEls.length} assistant messages with selector: ${sel}`);
+                    break;
+                }
+            }
+
+            const maxLen = Math.max(userEls.length, assistantEls.length);
+            for (let i = 0; i < maxLen; i++) {
+                const query = userEls[i]?.textContent?.trim() || '';
+                const answer = assistantEls[i]?.textContent?.trim() || '';
+                if (query || answer) {
+                    messages.push({ query, answer });
+                }
+            }
+        }
+
+        // Strategy 3: Markdown/prose containers (alternating pattern)
+        if (messages.length === 0) {
+            console.log('[DeepSeek] Strategy 3: Markdown containers');
+            
+            const markdownBlocks = document.querySelectorAll(
+                '[class*="markdown"], [class*="prose"], [class*="message-content"], .chat-content'
+            );
+            
+            if (markdownBlocks.length > 0) {
+                let currentQuery = '';
+                markdownBlocks.forEach((block, i) => {
+                    const text = block.textContent?.trim() || '';
+                    if (text.length > 10) {
+                        if (i % 2 === 0) {
+                            currentQuery = text;
+                        } else if (currentQuery) {
+                            messages.push({ query: currentQuery, answer: text });
+                            currentQuery = '';
+                        }
+                    }
+                });
+            }
+        }
+
+        // Strategy 4: Generic text blocks in main container
+        if (messages.length === 0) {
+            console.log('[DeepSeek] Strategy 4: Generic text extraction');
+            
+            const container = document.querySelector('.chat-container, .conversation-container, main');
+            if (container) {
+                const textBlocks = [];
+                const elements = container.querySelectorAll('p, div[class*="text"]');
+                
+                elements.forEach(el => {
+                    const text = el.textContent?.trim();
+                    if (text && text.length > 20 && !textBlocks.includes(text)) {
+                        textBlocks.push(text);
+                    }
+                });
+
+                for (let i = 0; i < textBlocks.length - 1; i += 2) {
+                    messages.push({ query: textBlocks[i], answer: textBlocks[i + 1] });
+                }
+            }
+        }
+
+        const filteredMessages = messages.filter(m => m.query?.trim() && m.answer?.trim());
+        console.log(`[DeepSeek] ✓ DOM extraction complete: ${filteredMessages.length} message pairs`);
+
+        const title = document.title?.replace(' - DeepSeek', '').replace('DeepSeek Chat', '').trim() ||
+                     filteredMessages[0]?.query?.substring(0, 100) ||
+                     'DeepSeek Conversation';
+
+        return { uuid, title, platform: 'DeepSeek', entries: filteredMessages };
     },
 
     getSpaces: async () => []
