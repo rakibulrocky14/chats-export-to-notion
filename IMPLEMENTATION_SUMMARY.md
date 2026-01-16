@@ -58,7 +58,7 @@ This document provides a comprehensive summary of all changes made to fix the Ch
    - 300+ lines
 
 7. **auth/callback.html** (New)
-   - OAuth redirect handler
+   - OAuth redirect handler (chromiumapp redirect)
    - User-friendly UI
    - Auto-close logic
    - ~80 lines

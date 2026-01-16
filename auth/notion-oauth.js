@@ -57,7 +57,7 @@ const NotionOAuth = {
             throw new Error('OAuth not configured. Please set Client ID and Client Secret in settings.');
         }
 
-        const state = crypto.randomUUID();
+        const state = crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         await chrome.storage.local.set({ notion_oauth_state: state });
 
         // Build authorization URL
@@ -160,13 +160,17 @@ const NotionOAuth = {
      */
     async storeTokens(tokens) {
         const expiresAt = Date.now() + (tokens.expires_in * 1000);
+        const existing = await chrome.storage.local.get([
+            'notion_oauth_workspace_id',
+            'notion_oauth_workspace_name'
+        ]);
 
         await chrome.storage.local.set({
             notion_oauth_access_token: tokens.access_token,
             notion_oauth_refresh_token: tokens.refresh_token,
             notion_oauth_token_expires: expiresAt,
-            notion_oauth_workspace_id: tokens.workspace_id,
-            notion_oauth_workspace_name: tokens.workspace_name,
+            notion_oauth_workspace_id: tokens.workspace_id || existing.notion_oauth_workspace_id,
+            notion_oauth_workspace_name: tokens.workspace_name || existing.notion_oauth_workspace_name,
             notion_auth_method: 'oauth' // Track which auth method is active
         });
 
@@ -274,11 +278,15 @@ const NotionOAuth = {
         if (status.method === 'oauth' && status.connected) {
             return this.getAccessToken();
         }
-        const stored = await chrome.storage.local.get(['notionApiKey']);
-        if (!stored.notionApiKey) {
+        const stored = await chrome.storage.local.get(['notionApiKey', 'notionKey']);
+        const token = stored.notionApiKey || stored.notionKey;
+        if (!token) {
             throw new Error('No Notion API key or OAuth token configured');
         }
-        return stored.notionApiKey;
+        if (!stored.notionApiKey && stored.notionKey) {
+            await chrome.storage.local.set({ notionApiKey: stored.notionKey });
+        }
+        return token;
     }
 };
 

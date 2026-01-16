@@ -22,7 +22,7 @@ This release focuses on fixing the three non-working platforms (ChatGPT, Gemini,
   - Redirect URI uses `chrome.identity.getRedirectURL('notion')`
   - Register redirect URL in Notion integration settings
   - `auth/notion-oauth.js` - Complete OAuth2 implementation
-  - `auth/callback.html` - OAuth redirect handler
+  - `auth/callback.html` - OAuth redirect handler (chromiumapp redirect)
 
 #### Platform Logos
 - ✨ **NEW:** Platform logo SVGs extracted to `icons/logos/`
@@ -129,7 +129,7 @@ This release focuses on fixing the three non-working platforms (ChatGPT, Gemini,
 - Updated `version` to `5.0.0`
 - Added `identity` permission for OAuth2
 - Added `web_accessible_resources` for:
-  - `auth/callback.html`
+  - `auth/callback.html` (chromiumapp redirect)
   - `auth/notion-oauth.js`
   - `icons/logos/*.svg`
 

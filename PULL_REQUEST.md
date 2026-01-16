@@ -114,7 +114,7 @@ const isUser = role === 'USER' || role === 'HUMAN' || (role === '' && idx % 2 ==
 
 #### New Files Created:
 - `auth/notion-oauth.js` - Complete OAuth2 flow
-- `auth/callback.html` - Authorization callback handler
+- `auth/callback.html` - Authorization callback handler (chromiumapp redirect)
 
 #### Features:
 - ✅ Full OAuth2 authorization flow
@@ -311,7 +311,6 @@ await NotionOAuth.disconnect();  // Revokes access
 ### Known Limitations:
 - Gemini RPC IDs may change (will need monitoring)
 - ChatGPT DOM selectors tied to current UI
-- OAuth requires extension reload after first auth
 - Some platforms rate-limit aggressive requests
 
 ## 📞 Review Notes

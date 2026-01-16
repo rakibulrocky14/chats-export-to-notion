@@ -977,6 +977,7 @@ async function handleOauthConnect() {
         await NotionOAuth.authorize();
         const status = await NotionOAuth.getStatus();
         updateOauthStatus({ notion_oauth_workspace_name: status.workspace });
+        await chrome.storage.local.set({ notion_auth_method: 'oauth' });
         log('✅ OAuth2 connected successfully', 'success');
     } catch (error) {
         log(`OAuth connection failed: ${error.message}`, 'error');
@@ -985,6 +986,7 @@ async function handleOauthConnect() {
 
 async function handleOauthDisconnect() {
     await NotionOAuth.disconnect();
+    await chrome.storage.local.set({ notion_auth_method: 'token' });
     updateOauthStatus({});
     log('OAuth disconnected', 'info');
 }
@@ -1946,14 +1948,16 @@ async function bulkSyncToNotion() {
 // ============================================
 async function syncToNotion(data) {
     // Load credentials from storage
-    const storage = await chrome.storage.local.get(['notionApiKey', 'notionDbId']);
-    const apiKey = storage.notionApiKey;
+    const storage = await chrome.storage.local.get(['notionDbId']);
     const dbId = storage.notionDbId;
 
-    if (!apiKey || !dbId) {
+    if (!dbId) {
         log('Notion not configured. Go to Settings to add API Key and Database ID.', 'error');
         throw new Error('Notion not configured');
     }
+
+    const apiKey = await resolveNotionToken();
+
 
     try {
         // Build content blocks from conversation entries

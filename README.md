@@ -152,10 +152,9 @@ cd chats-export-to-notion
 
 ```
 chats-export-to-notion/
-├── adapters/               # (Future) Platform adapters
 ├── auth/                   # Authentication modules
 │   ├── notion-oauth.js    # OAuth2 implementation
-│   └── callback.html      # OAuth callback page
+│   └── callback.html      # OAuth callback page (chromiumapp redirect)
 ├── icons/                  # Extension icons
 │   └── logos/             # Platform logo SVGs
 │       ├── perplexity.svg
@@ -164,8 +163,7 @@ chats-export-to-notion/
 │       ├── gemini.svg
 │       ├── grok.svg
 │       └── deepseek.svg
-├── ui/                     # (Future) UI components
-├── utils/                  # (Future) Utility functions
+
 ├── background.js           # Service worker
 ├── content.js              # Content script (contains adapters)
 ├── manifest.json           # Extension manifest

@@ -159,9 +159,23 @@ async function performAutoSync() {
             'autoSyncEnabled', 'autoSyncNotion', 'notionApiKey', 'notionKey', 'notionDbId', 'exportedUuids', 'notion_auth_method'
         ]);
 
-        const notionKey = settings.notionApiKey || settings.notionKey;
-        if (!settings.autoSyncEnabled || !notionKey || !settings.notionDbId) {
+        if (!settings.autoSyncEnabled || !settings.notionDbId) {
             console.log("[AutoSync] Skipped: Not configured or disabled");
+            await releaseSyncLock();
+            return;
+        }
+
+        if (typeof NotionOAuth === 'undefined') {
+            console.log("[AutoSync] Skipped: OAuth module not loaded");
+            await releaseSyncLock();
+            return;
+        }
+
+        let authToken;
+        try {
+            authToken = await NotionOAuth.getActiveToken();
+        } catch (error) {
+            console.log("[AutoSync] Skipped: Notion auth missing", error.message);
             await releaseSyncLock();
             return;
         }
